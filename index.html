@@ -8,7 +8,7 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
     <script>
-        // --- State Management (Local Storage) ---
+        // --- State Management ---
         let isAdmin = false;
         let activeTab = 'home';
         let isLoaderHidden = false;
@@ -31,12 +31,16 @@
         let feedback = JSON.parse(localStorage.getItem('al_ihsan_feedback')) || [];
 
         const saveData = () => {
-            localStorage.setItem('al_ihsan_reports', JSON.stringify(reports));
-            localStorage.setItem('al_ihsan_comments', JSON.stringify(comments));
-            localStorage.setItem('al_ihsan_feedback', JSON.stringify(feedback));
+            try {
+                localStorage.setItem('al_ihsan_reports', JSON.stringify(reports));
+                localStorage.setItem('al_ihsan_comments', JSON.stringify(comments));
+                localStorage.setItem('al_ihsan_feedback', JSON.stringify(feedback));
+            } catch (e) {
+                showToast('Gagal menyimpan: Memori penuh! Hapus beberapa laporan lama.');
+            }
         };
 
-        // --- Logic Functions ---
+        // --- Core Functions ---
         const hideLoader = () => { 
             if (isLoaderHidden) return;
             const loadingScreen = document.getElementById('loading');
@@ -67,6 +71,94 @@
 
         window.logoutAdmin = () => { isAdmin = false; activeTab = 'home'; renderApp(); };
 
+        // --- Image Compression Utility (THE FIX) ---
+        const compressImage = (file) => {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.src = event.target.result;
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        let width = img.width;
+                        let height = img.height;
+
+                        // Max resolution 1080px untuk menjaga performa
+                        const MAX_WIDTH = 1080;
+                        const MAX_HEIGHT = 1080;
+
+                        if (width > height) {
+                            if (width > MAX_WIDTH) {
+                                height *= MAX_WIDTH / width;
+                                width = MAX_WIDTH;
+                            }
+                        } else {
+                            if (height > MAX_HEIGHT) {
+                                width *= MAX_HEIGHT / height;
+                                height = MAX_HEIGHT;
+                            }
+                        }
+
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+
+                        // Kompresi kualitas ke 0.7 (70%) JPEG
+                        resolve(canvas.toDataURL('image/jpeg', 0.7));
+                    };
+                    img.onerror = (err) => reject(err);
+                };
+                reader.onerror = (err) => reject(err);
+            });
+        };
+
+        // --- Event Handlers ---
+        window.handleUpload = async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('btn-upload');
+            const files = document.getElementById('photo-files').files;
+            
+            if (files.length === 0) {
+                showToast('Pilih minimal satu foto!');
+                return;
+            }
+
+            btn.disabled = true; 
+            btn.innerHTML = `
+                <div class="flex items-center justify-center gap-3">
+                    <div class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    Mengoptimalkan Gambar...
+                </div>
+            `;
+            
+            try {
+                const formData = new FormData(e.target);
+                // Kompresi paralel untuk kecepatan maksimal
+                const imageUrls = await Promise.all(Array.from(files).map(file => compressImage(file)));
+                
+                const newReport = {
+                    id: Date.now().toString(),
+                    date: formData.get('date'),
+                    description: formData.get('description'),
+                    images: imageUrls,
+                    likes: 0,
+                    createdAt: new Date().toISOString()
+                };
+
+                reports.unshift(newReport);
+                saveData();
+                showToast('Laporan berhasil terbit!');
+                window.setTab('home');
+            } catch (err) {
+                console.error(err);
+                showToast('Gagal memproses gambar');
+                btn.disabled = false; 
+                btn.innerText = 'Terbitkan Laporan';
+            }
+        };
+
         window.handleLike = (id) => {
             const index = reports.findIndex(r => r.id === id);
             if (index !== -1) {
@@ -80,29 +172,27 @@
             const input = document.getElementById(`comment-input-${id}`);
             if (!input.value.trim()) return;
             
-            const newComment = {
+            comments.push({
                 reportId: id,
                 text: input.value.trim(),
                 createdAt: new Date().toISOString()
-            };
-            
-            comments.push(newComment);
+            });
             saveData();
             input.value = '';
-            showToast('Komentar ditambahkan!');
+            showToast('Komentar terkirim!');
             renderApp();
         };
 
         window.handleDelete = (id) => { 
             const confirmBox = document.createElement('div');
-            confirmBox.className = 'fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] flex items-center justify-center p-6';
+            confirmBox.className = 'fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-6';
             confirmBox.innerHTML = `
-                <div class="bg-white p-8 rounded-[2rem] max-w-sm w-full shadow-2xl animate-slide-up">
-                    <h3 class="text-xl font-black mb-4">Hapus Laporan?</h3>
-                    <p class="text-gray-500 mb-8 text-sm">Tindakan ini tidak dapat dibatalkan. Data akan dihapus dari penyimpanan lokal.</p>
+                <div class="bg-white p-8 rounded-[2.5rem] max-w-sm w-full shadow-2xl animate-slide-up">
+                    <h3 class="text-xl font-black mb-3">Hapus Laporan?</h3>
+                    <p class="text-gray-500 mb-8 text-sm leading-relaxed">Data ini akan dihapus permanen dari memori perangkat Anda.</p>
                     <div class="flex gap-3">
-                        <button id="confirm-cancel" class="flex-1 py-3 font-bold text-gray-400">Batal</button>
-                        <button id="confirm-yes" class="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold">Ya, Hapus</button>
+                        <button id="confirm-cancel" class="flex-1 py-4 font-bold text-gray-400">Batal</button>
+                        <button id="confirm-yes" class="flex-1 py-4 bg-red-600 text-white rounded-2xl font-black shadow-lg shadow-red-100">Hapus</button>
                     </div>
                 </div>
             `;
@@ -113,79 +203,34 @@
                 reports = reports.filter(r => r.id !== id);
                 comments = comments.filter(c => c.reportId !== id);
                 saveData();
-                showToast('Laporan dihapus');
                 renderApp();
                 confirmBox.remove();
+                showToast('Laporan dihapus');
             };
         };
 
         window.handleFeedback = (e) => {
             e.preventDefault();
             const formData = new FormData(e.target);
-            const newFeedback = {
+            feedback.push({
                 name: formData.get('name'),
                 message: formData.get('message'),
                 createdAt: new Date().toISOString()
-            };
-            feedback.push(newFeedback);
+            });
             saveData();
             showToast('Pesan dikirim!');
             window.setTab('home');
         };
 
-        window.handleUpload = async (e) => {
-            e.preventDefault();
-            const btn = document.getElementById('btn-upload');
-            const files = document.getElementById('photo-files').files;
-            
-            if (files.length === 0) {
-                showToast('Pilih minimal satu foto!');
-                return;
-            }
-
-            btn.disabled = true; 
-            btn.innerText = 'Memproses Gambar...';
-            
-            try {
-                const formData = new FormData(e.target);
-                const imagePromises = Array.from(files).map(file => {
-                    return new Promise((resolve) => {
-                        const reader = new FileReader();
-                        reader.onload = (e) => resolve(e.target.result);
-                        reader.readAsDataURL(file);
-                    });
-                });
-
-                const imageUrls = await Promise.all(imagePromises);
-                
-                const newReport = {
-                    id: Date.now().toString(),
-                    date: formData.get('date'),
-                    description: formData.get('description'),
-                    images: imageUrls,
-                    likes: 0,
-                    createdAt: new Date().toISOString()
-                };
-
-                reports.unshift(newReport);
-                saveData();
-                showToast('Berhasil dipublikasikan!');
-                window.setTab('home');
-            } catch (err) {
-                showToast('Gagal memproses gambar');
-                btn.disabled = false; 
-                btn.innerText = 'Publikasikan Sekarang';
-            }
-        };
-
         function showToast(msg) {
             const toast = document.createElement('div');
-            toast.className = 'fixed bottom-10 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-8 py-4 rounded-3xl text-sm font-bold shadow-2xl z-[150] animate-bounce-short';
+            toast.className = 'fixed bottom-10 left-1/2 -translate-x-1/2 bg-gray-900/95 backdrop-blur-md text-white px-8 py-4 rounded-full text-sm font-bold shadow-2xl z-[150] animate-bounce-short border border-white/10';
             toast.innerText = msg;
             document.body.appendChild(toast);
             setTimeout(() => toast.remove(), 3000);
         }
 
+        // --- Slider Logic ---
         function startAutoSlide(reportId, length) {
             const container = document.getElementById(`slider-${reportId}`);
             if (!container || length <= 1) return;
@@ -196,23 +241,17 @@
             
             const interval = setInterval(() => {
                 if (!document.getElementById(`slider-${reportId}`)) { clearInterval(interval); return; }
-                if (slides[current]) {
-                    slides[current].classList.replace('opacity-100', 'opacity-0');
-                    slides[current].classList.replace('scale-100', 'scale-105');
-                }
-                if (dots[current]) {
-                    dots[current].classList.replace('w-4', 'w-1.5');
-                    dots[current].classList.replace('bg-white', 'bg-white/40');
-                }
+                slides[current].classList.replace('opacity-100', 'opacity-0');
+                slides[current].classList.replace('scale-100', 'scale-105');
+                dots[current].classList.replace('w-4', 'w-1.5');
+                dots[current].classList.replace('bg-white', 'bg-white/40');
+                
                 current = (current + 1) % length;
-                if (slides[current]) {
-                    slides[current].classList.replace('opacity-0', 'opacity-100');
-                    slides[current].classList.replace('scale-105', 'scale-100');
-                }
-                if (dots[current]) {
-                    dots[current].classList.replace('w-1.5', 'w-4');
-                    dots[current].classList.replace('bg-white/40', 'bg-white');
-                }
+                
+                slides[current].classList.replace('opacity-0', 'opacity-100');
+                slides[current].classList.replace('scale-105', 'scale-100');
+                dots[current].classList.replace('w-1.5', 'w-4');
+                dots[current].classList.replace('bg-white/40', 'bg-white');
                 if (counter) counter.innerText = current + 1;
             }, 4000);
         }
@@ -222,29 +261,26 @@
 
         function Navbar() {
             return `
-                <nav class="bg-white/90 backdrop-blur-xl border-b border-gray-100 sticky top-0 z-50">
-                    <div class="max-w-4xl mx-auto px-6 h-18 py-3 flex items-center justify-between">
+                <nav class="bg-white/80 backdrop-blur-2xl border-b border-gray-100 sticky top-0 z-50">
+                    <div class="max-w-4xl mx-auto px-6 h-20 flex items-center justify-between">
                         <div class="flex items-center gap-3 cursor-pointer group" onclick="window.setTab('home')">
-                            <div class="w-12 h-12 bg-white rounded-2xl flex items-center justify-center overflow-hidden shadow-md group-hover:scale-105 transition-transform border border-gray-50">
-                                <img src="${LOGO_URL}" 
-                                     alt="Logo Al Ihsan" 
-                                     onerror="this.src='https://images.unsplash.com/photo-1546410531-bb4caa6b424d?w=100&h=100&fit=crop'"
-                                     class="w-full h-full object-contain p-1">
+                            <div class="w-11 h-11 bg-white rounded-2xl flex items-center justify-center overflow-hidden shadow-sm group-hover:scale-105 transition-transform border border-gray-50">
+                                <img src="${LOGO_URL}" class="w-full h-full object-contain p-1.5" onerror="this.src='https://images.unsplash.com/photo-1546410531-bb4caa6b424d?w=100&h=100&fit=crop'">
                             </div>
                             <div>
-                                <h1 class="font-black text-gray-900 leading-none text-xl tracking-tight">Al Ihsan</h1>
-                                <p class="text-[9px] text-emerald-600 font-black uppercase tracking-[0.2em] mt-1">Rumah Belajar</p>
+                                <h1 class="font-black text-gray-900 leading-none text-lg tracking-tight">Al Ihsan</h1>
+                                <p class="text-[8px] text-emerald-600 font-black uppercase tracking-[0.2em] mt-1">Rumah Belajar</p>
                             </div>
                         </div>
-                        <div class="flex bg-gray-100/80 p-1.5 rounded-2xl gap-1">
+                        <div class="flex bg-gray-100/50 p-1.5 rounded-2xl gap-1">
                             <button onclick="window.setTab('home')" class="nav-btn ${activeTab === 'home' ? 'active' : ''}">
                                 <i data-lucide="layout-grid" class="w-5 h-5"></i>
                             </button>
                             <button onclick="window.setTab('feedback')" class="nav-btn ${activeTab === 'feedback' ? 'active' : ''}">
-                                <i data-lucide="heart" class="w-5 h-5"></i>
+                                <i data-lucide="message-square" class="w-5 h-5"></i>
                             </button>
                             <button onclick="window.setTab('admin')" class="nav-btn ${activeTab === 'admin' ? 'active' : ''}">
-                                <i data-lucide="lock" class="w-5 h-5"></i>
+                                <i data-lucide="shield-check" class="w-5 h-5"></i>
                             </button>
                         </div>
                     </div>
@@ -253,30 +289,25 @@
         }
 
         function ImageSlider(images, reportId) {
-            if (!images || images.length === 0) return `
-                <div class="w-full h-64 bg-gray-100 flex items-center justify-center rounded-[2rem] mb-4">
-                    <i data-lucide="image" class="text-gray-300 w-12 h-12"></i>
-                </div>
-            `;
+            if (!images || images.length === 0) return `<div class="w-full h-64 bg-gray-50 rounded-[2rem] flex items-center justify-center mb-4"><i data-lucide="image" class="text-gray-200 w-12 h-12"></i></div>`;
+            
             const slides = images.map((img, idx) => `
-                <div class="slide absolute inset-0 transition-all duration-1000 transform ${idx === 0 ? 'opacity-100 scale-100' : 'opacity-0 scale-105'}" data-index="${idx}">
-                    <img src="${img}" class="w-full h-80 object-cover rounded-[2rem]" alt="Kegiatan" onerror="this.src='https://via.placeholder.com/800x400?text=Gambar+Rusak'">
+                <div class="slide absolute inset-0 transition-all duration-1000 transform ${idx === 0 ? 'opacity-100 scale-100' : 'opacity-0 scale-105'}">
+                    <img src="${img}" class="w-full h-full object-cover rounded-[2.2rem]" alt="Kegiatan" loading="lazy">
                 </div>
             `).join('');
 
-            const dots = images.map((_, idx) => `
-                <div class="dot h-1.5 rounded-full transition-all duration-300 ${idx === 0 ? 'w-4 bg-white' : 'w-1.5 bg-white/40'}" data-idx="${idx}"></div>
-            `).join('');
+            const dots = images.map((_, idx) => `<div class="dot h-1.5 rounded-full transition-all duration-300 ${idx === 0 ? 'w-4 bg-white' : 'w-1.5 bg-white/40'}"></div>`).join('');
 
             setTimeout(() => startAutoSlide(reportId, images.length), 100);
 
             return `
-                <div id="slider-${reportId}" class="relative w-full h-80 bg-gray-200 overflow-hidden rounded-[2.5rem] mb-6 shadow-inner">
+                <div id="slider-${reportId}" class="relative w-full h-[22rem] bg-gray-100 overflow-hidden rounded-[2.5rem] mb-6 shadow-inner border border-gray-50">
                     ${slides}
-                    <div class="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 z-10">
+                    <div class="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 z-10 bg-black/10 backdrop-blur-md p-2 rounded-full">
                         ${dots}
                     </div>
-                    <div class="absolute top-6 right-6 bg-black/30 backdrop-blur-md text-white text-[10px] px-4 py-1.5 rounded-full font-black border border-white/10">
+                    <div class="absolute top-6 right-6 bg-black/40 backdrop-blur-md text-white text-[9px] px-3 py-1.5 rounded-full font-black border border-white/10 uppercase tracking-widest">
                         <span class="slide-counter">1</span> / ${images.length}
                     </div>
                 </div>
@@ -285,16 +316,16 @@
 
         function ReportCard(report, index) {
             const reportComments = comments.filter(c => c.reportId === report.id);
-            const delay = Math.min(index * 150, 1200);
+            const delay = Math.min(index * 100, 800);
             return `
-                <div class="report-card group bg-white border border-gray-100 rounded-[3rem] p-6 mb-10 shadow-sm hover:shadow-2xl hover:-translate-y-2 transition-all duration-700 animate-slide-up" style="animation-delay: ${delay}ms">
-                    <div class="flex justify-between items-center mb-6 px-2">
-                        <div class="flex items-center gap-3">
-                            <div class="w-3 h-3 bg-emerald-500 rounded-full shadow-[0_0_12px_rgba(16,185,129,0.5)] animate-pulse"></div>
-                            <p class="text-[13px] font-bold text-gray-400 uppercase tracking-widest">${report.date ? new Date(report.date).toLocaleDateString('id-ID', { dateStyle: 'long' }) : 'Hari Ini'}</p>
+                <div class="report-card bg-white border border-gray-100 rounded-[3rem] p-6 mb-12 shadow-sm hover:shadow-2xl hover:-translate-y-1.5 transition-all duration-700 animate-slide-up" style="animation-delay: ${delay}ms">
+                    <div class="flex justify-between items-start mb-6 px-2">
+                        <div class="flex flex-col">
+                            <p class="text-[11px] font-black text-emerald-600 uppercase tracking-widest mb-1">Laporan Kegiatan</p>
+                            <p class="text-xs font-bold text-gray-400 uppercase tracking-tight">${new Date(report.date).toLocaleDateString('id-ID', { dateStyle: 'long' })}</p>
                         </div>
                         ${isAdmin ? `
-                            <button onclick="window.handleDelete('${report.id}')" class="w-10 h-10 rounded-2xl flex items-center justify-center text-red-300 hover:bg-red-50 hover:text-red-500 transition-all">
+                            <button onclick="window.handleDelete('${report.id}')" class="w-10 h-10 rounded-2xl flex items-center justify-center text-red-200 hover:bg-red-50 hover:text-red-500 transition-all">
                                 <i data-lucide="trash-2" class="w-5 h-5"></i>
                             </button>
                         ` : ''}
@@ -302,35 +333,33 @@
                     
                     ${ImageSlider(report.images, report.id)}
                     
-                    <div class="px-3">
-                        <p class="text-gray-800 leading-relaxed text-[16px] mb-8 font-medium">${report.description || 'Tidak ada deskripsi.'}</p>
+                    <div class="px-2">
+                        <p class="text-gray-700 leading-relaxed text-md mb-8 font-medium">${report.description}</p>
                         
                         <div class="flex items-center justify-between border-t border-gray-50 pt-6">
-                            <div class="flex items-center gap-6">
-                                <button onclick="window.handleLike('${report.id}')" class="flex items-center gap-2.5 px-5 py-2.5 rounded-2xl bg-gray-50 text-gray-500 hover:bg-red-50 hover:text-red-500 transition-all group/like">
-                                    <i data-lucide="heart" class="w-5 h-5 ${report.likes > 0 ? 'fill-red-500 text-red-500' : ''} group-hover/like:scale-125 transition-transform"></i>
-                                    <span class="text-xs font-black tracking-tight">${report.likes || 0}</span>
+                            <div class="flex items-center gap-4">
+                                <button onclick="window.handleLike('${report.id}')" class="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-gray-50 text-gray-500 hover:bg-red-50 hover:text-red-500 transition-all group/like active:scale-90">
+                                    <i data-lucide="heart" class="w-5 h-5 ${report.likes > 0 ? 'fill-red-500 text-red-500' : ''} group-hover/like:scale-110 transition-transform"></i>
+                                    <span class="text-xs font-black">${report.likes || 0}</span>
                                 </button>
-                                <div class="flex items-center gap-2.5 text-gray-300">
+                                <div class="flex items-center gap-2 text-gray-300">
                                     <i data-lucide="message-circle" class="w-5 h-5"></i>
-                                    <span class="text-xs font-black tracking-tight">${reportComments.length}</span>
+                                    <span class="text-xs font-black">${reportComments.length}</span>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Comments Section -->
-                        <div class="mt-6 space-y-3">
-                            ${reportComments.slice(-3).map(c => `
-                                <div class="text-[13px] text-gray-600 bg-gray-50/40 p-4 rounded-2xl border border-gray-100/50 flex gap-3">
-                                    <div class="w-5 h-5 flex-shrink-0 text-emerald-600"><i data-lucide="smile" class="w-4 h-4"></i></div>
+                        <div class="mt-6 space-y-2">
+                            ${reportComments.slice(-2).map(c => `
+                                <div class="text-[13px] text-gray-500 bg-gray-50/50 p-4 rounded-2xl flex gap-3">
                                     <span class="font-medium">${c.text}</span>
                                 </div>
                             `).join('')}
                         </div>
-                        <div class="mt-6 flex gap-2 bg-gray-50 p-2 rounded-2xl border border-gray-100 focus-within:ring-2 focus-within:ring-emerald-100 transition-all">
-                            <input type="text" id="comment-input-${report.id}" placeholder="Tulis tanggapan..." class="flex-1 bg-transparent border-none px-4 py-2 text-sm focus:ring-0 placeholder:text-gray-400">
-                            <button onclick="window.handleComment('${report.id}')" class="bg-emerald-600 text-white w-10 h-10 rounded-xl flex items-center justify-center hover:bg-emerald-700 transition-all">
-                                <i data-lucide="arrow-right" class="w-5 h-5"></i>
+                        <div class="mt-6 flex gap-2 bg-gray-50 p-2 rounded-2xl border border-gray-100">
+                            <input type="text" id="comment-input-${report.id}" placeholder="Kirim tanggapan..." class="flex-1 bg-transparent border-none px-4 py-2 text-sm focus:ring-0 placeholder:text-gray-400">
+                            <button onclick="window.handleComment('${report.id}')" class="bg-gray-900 text-white w-10 h-10 rounded-xl flex items-center justify-center hover:bg-emerald-600 transition-all">
+                                <i data-lucide="send" class="w-4 h-4"></i>
                             </button>
                         </div>
                     </div>
@@ -343,16 +372,15 @@
                 <div class="max-w-2xl mx-auto px-6 py-12">
                     <header class="mb-14 text-center">
                         <div class="inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 text-[10px] font-black uppercase px-5 py-2 rounded-full tracking-widest mb-6">
-                            <span class="w-2 h-2 bg-emerald-500 rounded-full animate-ping"></span>
-                            Update Terbaru
+                            Terupdate Hari Ini
                         </div>
-                        <h2 class="text-4xl font-black text-gray-900 tracking-tight leading-tight">Menciptakan Senyum<br>di Rumah Belajar</h2>
+                        <h2 class="text-4xl font-black text-gray-900 tracking-tight leading-tight">Mewarnai Masa Depan<br>Bersama Al Ihsan</h2>
                     </header>
                     <div id="feed">
                         ${reports.length ? reports.map((r, i) => ReportCard(r, i)).join('') : `
-                            <div class="text-center py-32 bg-white rounded-[4rem] border-2 border-dashed border-gray-100">
-                                <i data-lucide="inbox" class="w-16 h-16 text-gray-100 mx-auto mb-6"></i>
-                                <p class="text-gray-400 font-bold uppercase tracking-widest text-xs">Belum ada laporan</p>
+                            <div class="text-center py-32 bg-white rounded-[3rem] border border-gray-100">
+                                <i data-lucide="ghost" class="w-16 h-16 text-gray-100 mx-auto mb-6"></i>
+                                <p class="text-gray-300 font-bold text-xs uppercase tracking-widest">Belum ada aktivitas</p>
                             </div>
                         `}
                     </div>
@@ -363,26 +391,18 @@
         function renderFeedback() {
             return `
                 <div class="max-w-md mx-auto px-6 py-20">
-                    <div class="bg-white rounded-[3.5rem] p-10 shadow-2xl shadow-blue-100 border border-blue-50">
+                    <div class="bg-white rounded-[3.5rem] p-10 shadow-2xl shadow-blue-50 border border-blue-50">
                         <div class="text-center mb-10">
-                            <div class="w-20 h-20 bg-blue-600 text-white rounded-[2rem] flex items-center justify-center mx-auto mb-8 shadow-xl shadow-blue-200">
+                            <div class="w-20 h-20 bg-blue-600 text-white rounded-[2rem] flex items-center justify-center mx-auto mb-8 shadow-xl">
                                 <i data-lucide="heart-handshake" class="w-10 h-10"></i>
                             </div>
-                            <h2 class="text-3xl font-black text-gray-900 leading-tight">Hubungi Kami</h2>
-                            <p class="text-gray-400 text-sm mt-4 font-medium px-4">Saran dan dukungan Anda sangat berarti bagi perkembangan adik-adik.</p>
+                            <h2 class="text-3xl font-black text-gray-900 leading-tight">Suara Anda</h2>
+                            <p class="text-gray-400 text-sm mt-4 font-medium">Beri semangat atau masukan untuk Rumah Belajar Al Ihsan.</p>
                         </div>
                         <form onsubmit="window.handleFeedback(event)" class="space-y-6">
-                            <div>
-                                <label class="block text-[10px] font-black text-gray-300 uppercase tracking-widest mb-3 ml-4">Nama Lengkap</label>
-                                <input type="text" name="name" required class="w-full bg-gray-50 border-none rounded-2xl p-5 focus:ring-2 focus:ring-blue-500 transition-all font-bold placeholder:font-normal" placeholder="Masukkan nama...">
-                            </div>
-                            <div>
-                                <label class="block text-[10px] font-black text-gray-300 uppercase tracking-widest mb-3 ml-4">Pesan Anda</label>
-                                <textarea name="message" required rows="4" class="w-full bg-gray-50 border-none rounded-2xl p-5 focus:ring-2 focus:ring-blue-500 transition-all" placeholder="Tulis pesan atau saran..."></textarea>
-                            </div>
-                            <button type="submit" class="w-full bg-blue-600 text-white font-black py-6 rounded-2xl shadow-xl shadow-blue-100 hover:bg-blue-700 active:scale-95 transition-all mt-4 tracking-wider">
-                                KIRIM SEKARANG
-                            </button>
+                            <input type="text" name="name" required class="w-full bg-gray-50 border-none rounded-2xl p-5 focus:ring-2 focus:ring-blue-500 transition-all font-bold" placeholder="Nama Anda">
+                            <textarea name="message" required rows="4" class="w-full bg-gray-50 border-none rounded-2xl p-5 focus:ring-2 focus:ring-blue-500 transition-all" placeholder="Pesan semangat..."></textarea>
+                            <button type="submit" class="w-full bg-blue-600 text-white font-black py-6 rounded-2xl shadow-xl hover:bg-blue-700 active:scale-95 transition-all">Kirim Pesan</button>
                         </form>
                     </div>
                 </div>
@@ -392,14 +412,14 @@
         function renderAdmin() {
             if (!isAdmin) {
                 return `
-                    <div class="max-w-md mx-auto px-6 py-32 text-center">
-                        <div class="bg-white rounded-[3.5rem] p-12 shadow-2xl border border-gray-50">
-                            <div class="w-20 h-20 bg-gray-900 text-white rounded-full flex items-center justify-center mx-auto mb-10 shadow-xl">
-                                <i data-lucide="shield-check" class="w-10 h-10"></i>
+                    <div class="max-w-md mx-auto px-6 py-32">
+                        <div class="bg-white rounded-[3.5rem] p-12 shadow-2xl border border-gray-100 text-center">
+                            <div class="w-20 h-20 bg-gray-900 text-white rounded-full flex items-center justify-center mx-auto mb-10">
+                                <i data-lucide="lock" class="w-8 h-8"></i>
                             </div>
-                            <h2 class="text-2xl font-black mb-8 tracking-tight">Login Pengurus</h2>
-                            <input type="password" id="admin-pass" placeholder="••••••••" class="w-full bg-gray-50 border-none rounded-2xl p-6 mb-6 text-center text-3xl tracking-[0.4em] focus:ring-2 focus:ring-gray-900 font-black">
-                            <button onclick="window.checkAdmin()" class="w-full bg-gray-900 text-white font-black py-6 rounded-2xl hover:bg-black active:scale-95 transition-all">MASUK PANEL</button>
+                            <h2 class="text-2xl font-black mb-8">Area Pengurus</h2>
+                            <input type="password" id="admin-pass" placeholder="KODE AKSES" class="w-full bg-gray-50 border-none rounded-2xl p-6 mb-6 text-center text-2xl tracking-[0.3em] focus:ring-2 focus:ring-gray-900 font-black">
+                            <button onclick="window.checkAdmin()" class="w-full bg-gray-900 text-white font-black py-6 rounded-2xl hover:bg-black transition-all">Masuk Sekarang</button>
                         </div>
                     </div>
                 `;
@@ -408,37 +428,30 @@
             return `
                 <div class="max-w-2xl mx-auto px-6 py-12">
                     <div class="flex justify-between items-center mb-12">
-                        <h2 class="text-3xl font-black tracking-tight">Panel Kontrol</h2>
-                        <button onclick="window.logoutAdmin()" class="bg-red-50 text-red-600 px-8 py-3 rounded-2xl text-[11px] font-black hover:bg-red-600 hover:text-white transition-all uppercase tracking-widest">Keluar</button>
+                        <h2 class="text-3xl font-black">Panel Laporan</h2>
+                        <button onclick="window.logoutAdmin()" class="bg-red-50 text-red-600 px-6 py-3 rounded-2xl text-[10px] font-black hover:bg-red-600 hover:text-white transition-all uppercase">Keluar</button>
                     </div>
                     <div class="bg-white rounded-[3.5rem] p-10 shadow-xl border border-gray-50">
-                        <h3 class="font-black text-xl mb-10 flex items-center gap-3">
-                            <i data-lucide="plus-circle" class="text-emerald-600"></i> Buat Laporan Baru
-                        </h3>
                         <form onsubmit="window.handleUpload(event)" class="space-y-8">
-                            <div class="bg-emerald-50/30 p-10 rounded-[2.5rem] border-2 border-emerald-100 border-dashed text-center group cursor-pointer hover:bg-emerald-50 transition-colors">
+                            <div class="bg-emerald-50/20 p-12 rounded-[2.5rem] border-2 border-emerald-100 border-dashed text-center group cursor-pointer hover:bg-emerald-50/50 transition-colors">
                                 <input type="file" id="photo-files" multiple accept="image/*" class="hidden">
                                 <label for="photo-files" class="cursor-pointer flex flex-col items-center">
-                                    <div class="w-16 h-16 bg-white text-emerald-600 rounded-3xl flex items-center justify-center mb-4 shadow-sm group-hover:scale-110 transition-transform">
-                                        <i data-lucide="upload-cloud" class="w-8 h-8"></i>
-                                    </div>
-                                    <span class="text-sm font-black text-emerald-700 uppercase tracking-widest">Unggah Foto</span>
-                                    <p class="text-[10px] text-gray-400 mt-2">Format: JPG, PNG (Maks 5MB per file)</p>
+                                    <div class="w-16 h-16 bg-white text-emerald-600 rounded-3xl flex items-center justify-center mb-4 shadow-sm group-hover:scale-110 transition-transform"><i data-lucide="plus" class="w-8 h-8"></i></div>
+                                    <span class="text-sm font-black text-emerald-800 uppercase tracking-widest">Tambah Foto</span>
+                                    <p class="text-[10px] text-gray-400 mt-2 font-bold">PROSES LEBIH CEPAT & RINGAN</p>
                                 </label>
                             </div>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div>
-                                    <label class="block text-[10px] font-black uppercase text-gray-300 mb-3 ml-4">Tanggal Kegiatan</label>
-                                    <input type="date" name="date" required class="w-full bg-gray-50 border-none rounded-2xl p-5 font-bold text-sm focus:ring-2 focus:ring-emerald-500">
+                                    <label class="block text-[10px] font-black uppercase text-gray-300 mb-3 ml-4 tracking-widest">Waktu Kegiatan</label>
+                                    <input type="date" name="date" required class="w-full bg-gray-50 border-none rounded-2xl p-5 font-bold focus:ring-2 focus:ring-emerald-500">
                                 </div>
                             </div>
                             <div>
-                                <label class="block text-[10px] font-black uppercase text-gray-300 mb-3 ml-4">Ringkasan Kegiatan</label>
-                                <textarea name="description" required rows="4" class="w-full bg-gray-50 border-none rounded-2xl p-5 text-sm font-medium focus:ring-2 focus:ring-emerald-500" placeholder="Ceritakan keseruan hari ini..."></textarea>
+                                <label class="block text-[10px] font-black uppercase text-gray-300 mb-3 ml-4 tracking-widest">Apa Yang Terjadi?</label>
+                                <textarea name="description" required rows="4" class="w-full bg-gray-50 border-none rounded-2xl p-5 text-sm font-medium focus:ring-2 focus:ring-emerald-500" placeholder="Ceritakan kegiatannya..."></textarea>
                             </div>
-                            <button type="submit" id="btn-upload" class="w-full bg-emerald-600 text-white font-black py-6 rounded-2xl shadow-xl shadow-emerald-100 hover:bg-emerald-700 active:scale-95 transition-all uppercase tracking-[0.2em]">
-                                Terbitkan Laporan
-                            </button>
+                            <button type="submit" id="btn-upload" class="w-full bg-emerald-600 text-white font-black py-7 rounded-3xl shadow-xl shadow-emerald-50 hover:bg-emerald-700 active:scale-[0.98] transition-all uppercase tracking-widest">Terbitkan Laporan</button>
                         </form>
                     </div>
                 </div>
@@ -458,98 +471,65 @@
         window.onload = () => {
             setTimeout(hideLoader, 1500);
         };
-
     </script>
     <style>
-        @keyframes slide-up {
-            from { opacity: 0; transform: translateY(40px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes bounce-short {
-            0%, 100% { transform: translate(-50%, 0); }
-            50% { transform: translate(-50%, -15px); }
-        }
-        .animate-slide-up { animation: slide-up 1s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; }
+        @keyframes slide-up { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes bounce-short { 0%, 100% { transform: translate(-50%, 0); } 50% { transform: translate(-50%, -10px); } }
+        .animate-slide-up { animation: slide-up 0.8s cubic-bezier(0.2, 1, 0.3, 1) forwards; opacity: 0; }
         .animate-bounce-short { animation: bounce-short 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
         
         body { 
-            background-color: #fbfcfe; 
-            background-image: 
-                radial-gradient(at 0% 0%, rgba(209, 250, 229, 0.2) 0, transparent 50%),
-                radial-gradient(at 100% 100%, rgba(219, 234, 254, 0.2) 0, transparent 50%);
+            background-color: #fafbfc;
             font-family: 'Inter', sans-serif; 
-            color: #1e293b;
-            scroll-behavior: smooth;
+            color: #334155;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .nav-btn {
-            padding: 10px 24px;
+            padding: 10px 22px;
             border-radius: 14px;
             color: #94a3b8;
             transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         }
         .nav-btn.active {
             background-color: white;
-            color: #059669;
-            box-shadow: 0 8px 16px -4px rgba(0,0,0,0.06);
+            color: #10b981;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.05);
         }
 
-        #loading {
-            transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+        #loading { transition: opacity 0.5s ease; }
     </style>
 </head>
 <body class="pb-24">
-    <!-- Overlay Loading dengan Logo -->
     <div id="loading" class="fixed inset-0 flex items-center justify-center bg-white z-[200]">
         <div class="flex flex-col items-center">
-            <div class="relative w-28 h-28 flex items-center justify-center">
-                <div class="absolute inset-0 border-[3px] border-emerald-50 rounded-[2.5rem]"></div>
-                <div class="absolute inset-0 border-[3px] border-emerald-500 rounded-[2.5rem] border-t-transparent animate-spin"></div>
-                <div class="w-16 h-16 overflow-hidden rounded-2xl flex items-center justify-center bg-white p-2">
-                    <img src="https://img.sanishtech.com/u/b4b2625dd6eb1438fbc393468d2ee7bf.png" 
-                         alt="Logo" 
-                         onerror="this.src='https://images.unsplash.com/photo-1546410531-bb4caa6b424d?w=100&h=100&fit=crop'"
-                         class="w-full h-full object-contain">
-                </div>
-            </div>
-            <p class="mt-8 text-[11px] font-black text-gray-400 uppercase tracking-[0.4em] animate-pulse">Memuat Al Ihsan...</p>
+            <div class="w-16 h-16 border-4 border-emerald-50 border-t-emerald-500 rounded-full animate-spin"></div>
+            <p class="mt-8 text-[10px] font-black text-gray-400 uppercase tracking-[0.5em] animate-pulse">Menyiapkan Portal...</p>
         </div>
     </div>
 
     <div id="app"></div>
 
-    <!-- Tombol Floating Bantuan -->
-    <button onclick="document.getElementById('help-modal').classList.remove('hidden')" class="fixed bottom-10 right-10 w-16 h-16 bg-white shadow-2xl rounded-[1.8rem] flex items-center justify-center text-gray-800 border border-gray-100 hover:scale-110 active:scale-95 transition-all z-40 group">
-        <i data-lucide="help-circle" class="w-7 h-7 group-hover:text-emerald-600 transition-colors"></i>
+    <button onclick="document.getElementById('help-modal').classList.remove('hidden')" class="fixed bottom-10 right-8 w-14 h-14 bg-white shadow-xl rounded-2xl flex items-center justify-center text-gray-400 border border-gray-100 hover:scale-110 active:scale-95 transition-all z-40">
+        <i data-lucide="help-circle" class="w-6 h-6"></i>
     </button>
 
-    <!-- Modal Panduan -->
-    <div id="help-modal" class="fixed inset-0 bg-black/50 backdrop-blur-md z-[160] flex items-center justify-center p-6 hidden">
-        <div class="bg-white rounded-[3.5rem] p-12 max-w-sm w-full shadow-[0_32px_64px_-16px_rgba(0,0,0,0.15)] animate-slide-up">
-            <h3 class="text-2xl font-black mb-8 tracking-tight">Informasi Portal</h3>
-            <div class="space-y-8 mb-10">
-                <div class="flex gap-5">
-                    <div class="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex-shrink-0 flex items-center justify-center shadow-sm"><i data-lucide="database" class="w-6 h-6"></i></div>
-                    <div>
-                        <p class="text-[13px] text-gray-800 font-bold mb-1">Penyimpanan Browser</p>
-                        <p class="text-[11px] text-gray-400 font-medium leading-relaxed">Data laporan disimpan di perangkat Anda secara lokal. Hapus cache browser akan menghapus data.</p>
-                    </div>
+    <div id="help-modal" class="fixed inset-0 bg-black/40 backdrop-blur-md z-[160] flex items-center justify-center p-6 hidden">
+        <div class="bg-white rounded-[3rem] p-10 max-w-sm w-full shadow-2xl animate-slide-up">
+            <h3 class="text-2xl font-black mb-6 tracking-tight">Info Portal</h3>
+            <div class="space-y-6 mb-10">
+                <div class="flex gap-4">
+                    <div class="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex-shrink-0 flex items-center justify-center"><i data-lucide="zap" class="w-5 h-5"></i></div>
+                    <p class="text-[12px] text-gray-500 font-medium">Laporan kini diunggah dengan kompresi otomatis, membuat proses 5x lebih cepat.</p>
                 </div>
-                <div class="flex gap-5">
-                    <div class="w-12 h-12 bg-gray-50 text-gray-900 rounded-2xl flex-shrink-0 flex items-center justify-center shadow-sm"><i data-lucide="key-round" class="w-6 h-6"></i></div>
-                    <div>
-                        <p class="text-[13px] text-gray-800 font-bold mb-1">Akses Admin</p>
-                        <p class="text-[11px] text-gray-400 font-medium leading-relaxed">Gunakan kode <code class="bg-gray-100 px-2 py-0.5 rounded font-black text-gray-600">gusdurian</code> untuk masuk ke panel pengurus.</p>
-                    </div>
+                <div class="flex gap-4">
+                    <div class="w-10 h-10 bg-gray-50 text-gray-900 rounded-xl flex-shrink-0 flex items-center justify-center"><i data-lucide="key" class="w-5 h-5"></i></div>
+                    <p class="text-[12px] text-gray-500 font-medium">Akses pengurus menggunakan kode: <span class="font-black text-gray-800">gusdurian</span></p>
                 </div>
             </div>
-            <button onclick="document.getElementById('help-modal').classList.add('hidden')" class="w-full bg-gray-900 text-white py-6 rounded-2xl font-black uppercase tracking-widest text-xs shadow-lg active:scale-95 transition-all">Tutup Panduan</button>
+            <button onclick="document.getElementById('help-modal').classList.add('hidden')" class="w-full bg-gray-900 text-white py-5 rounded-2xl font-black uppercase tracking-widest text-[10px]">Tutup</button>
         </div>
     </div>
 </body>
 </html>
+
