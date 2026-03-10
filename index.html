@@ -452,29 +452,83 @@
 </html>
 
 <script type="module">
-  // 1. Import library yang dibutuhkan
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-  import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-analytics.js";
-  // Import database jika ingin pakai real-time
-  import { getDatabase, ref, set } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+  import { getDatabase, ref, set, push, onValue, remove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-  // 2. Konfigurasi milik Anda
   const firebaseConfig = {
     apiKey: "AIzaSyDMvljAuezBNT0XqEYqHGyeiLFsLj2nc-g",
     authDomain: "rumah-belajar-9d96f.firebaseapp.com",
     projectId: "rumah-belajar-9d96f",
+    databaseURL: "https://rumah-belajar-9d96f-default-rtdb.firebaseio.com", // Pastikan URL ini sesuai di Firebase Console
     storageBucket: "rumah-belajar-9d96f.firebasestorage.app",
     messagingSenderId: "986983944919",
-    appId: "1:986983944919:web:fb7a0a57cfd764e848d692",
-    measurementId: "G-5VPX35WY6F"
+    appId: "1:986983944919:web:fb7a0a57cfd764e848d692"
   };
 
-  // 3. Inisialisasi
   const app = initializeApp(firebaseConfig);
-  const analytics = getAnalytics(app);
-  const db = getDatabase(app); // Menghubungkan ke Realtime Database
+  const db = getDatabase(app);
 
-  console.log("Firebase berhasil terhubung!");
+  // --- 1. MENGAMBIL DATA SECARA REAL-TIME ---
+  // Fungsi ini otomatis berjalan setiap kali ada data baru di Cloud
+  onValue(ref(db, 'reports'), (snapshot) => {
+    const data = snapshot.val();
+    window.reports = data ? Object.values(data).reverse() : [];
+    renderApp(); // Gambar ulang tampilan setiap ada data baru
+  });
+
+  onValue(ref(db, 'comments'), (snapshot) => {
+    const data = snapshot.val();
+    window.comments = data ? Object.values(data) : [];
+    renderApp();
+  });
+
+  // --- 2. MENGGANTI FUNGSI UPLOAD ---
+  window.handleUpload = async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('btn-upload');
+    const formData = new FormData(e.target);
+    
+    btn.disabled = true;
+    btn.innerText = "Mengirim ke Cloud...";
+
+    try {
+        const imageUrls = [];
+        for (const file of currentSelectedFiles) {
+            const compressed = await compressImage(file);
+            imageUrls.push(compressed);
+        }
+
+        const newReportRef = push(ref(db, 'reports')); // Buat ID unik di Firebase
+        const newReport = {
+            id: newReportRef.key,
+            date: formData.get('date'),
+            tema: formData.get('tema'),
+            description: formData.get('description'),
+            images: imageUrls,
+            likes: 0,
+            createdAt: new Date().toISOString()
+        };
+
+        await set(newReportRef, newReport);
+        showToast('Berhasil diupload ke Cloud!');
+        window.setTab('home');
+    } catch (err) {
+        showToast('Gagal kirim: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerText = "Simpan Laporan";
+    }
+  };
+
+  // --- 3. FUNGSI DELETE (Cloud) ---
+  window.handleDelete = (id) => {
+    if(confirm("Hapus permanen dari Cloud?")) {
+        remove(ref(db, `reports/${id}`));
+        showToast('Terhapus dari Cloud');
+    }
+  };
+
+  // Tambahkan fungsi handleLike dan handleComment dengan pola 'set' atau 'push' yang sama...
 </script>
 
 
