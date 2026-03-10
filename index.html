@@ -31,7 +31,6 @@
         .nav-btn.active { background-color: white; color: #10b981; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.04); }
         #loading { transition: opacity 0.5s ease, visibility 0.5s; }
         
-        /* Utility for horizontal scroll without scrollbar */
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         
@@ -61,7 +60,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, addDoc, onSnapshot, query, deleteDoc, updateDoc, increment } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, doc, addDoc, onSnapshot, deleteDoc, updateDoc, increment } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Global State
         const LOGO_URL = "https://img.sanishtech.com/u/b4b2625dd6eb1438fbc393468d2ee7bf.png";
@@ -76,12 +75,27 @@
         let currentUser = null;
         let isLoadingData = true;
 
-        // Firebase Setup
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = initializeApp(firebaseConfig);
+        // Configuration
+        const userFirebaseConfig = { 
+            apiKey: "AIzaSyDMvljAuezBNT0XqEYqHGyeiLFsLj2nc-g", 
+            authDomain: "rumah-belajar-9d96f.firebaseapp.com", 
+            databaseURL: "https://rumah-belajar-9d96f-default-rtdb.firebaseio.com", 
+            projectId: "rumah-belajar-9d96f", 
+            storageBucket: "rumah-belajar-9d96f.firebasestorage.app", 
+            messagingSenderId: "986983944919", 
+            appId: "1:986983944919:web:f9d44b3d59c8bd6348d692", 
+            measurementId: "G-XJVNPERMZG" 
+        };
+
+        const appConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : userFirebaseConfig;
+        const app = initializeApp(appConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'rumah-belajar-al-ihsan';
+
+        // Paths based on mandatory rules
+        const reportsCollectionPath = `/artifacts/${appId}/public/data/reports`;
+        const commentsCollectionPath = `/artifacts/${appId}/public/data/comments`;
 
         // --- Auth Logic ---
         const initAuth = async () => {
@@ -98,8 +112,8 @@
         };
 
         onAuthStateChanged(auth, (user) => {
+            currentUser = user;
             if (user) {
-                currentUser = user;
                 setupListeners();
             }
         });
@@ -116,6 +130,8 @@
         };
 
         const setupListeners = () => {
+            if (!currentUser) return;
+
             const reportsRef = collection(db, 'artifacts', appId, 'public', 'data', 'reports');
             const commentsRef = collection(db, 'artifacts', appId, 'public', 'data', 'comments');
 
@@ -184,7 +200,6 @@
                     img.src = e.target.result;
                     img.onload = () => {
                         const canvas = document.createElement('canvas');
-                        // TINGKATKAN KUALITAS: MAX_SIZE 800px untuk ketajaman lebih baik
                         const MAX_SIZE = 800; 
                         let width = img.width;
                         let height = img.height;
@@ -199,7 +214,6 @@
                         ctx.imageSmoothingEnabled = true;
                         ctx.imageSmoothingQuality = 'high';
                         ctx.drawImage(img, 0, 0, width, height);
-                        // Kualitas 0.6 (60%) adalah titik optimal ketajaman vs ukuran file
                         resolve(canvas.toDataURL('image/jpeg', 0.6));
                     };
                 };
@@ -229,12 +243,13 @@
                     description: formData.get('description'),
                     images: imageUrls,
                     likes: 0,
-                    createdAt: new Date().toISOString()
+                    createdAt: new Date().toISOString(),
+                    userId: currentUser.uid
                 });
                 showToast('Laporan HD Berhasil terbit!');
                 window.setTab('home');
             } catch (err) {
-                showToast('Gagal: Koleksi foto terlalu besar.');
+                showToast('Gagal: Ukuran data mungkin melampaui batas.');
                 console.error(err);
             } finally {
                 btn.disabled = false;
@@ -247,7 +262,9 @@
             try {
                 const ref = doc(db, 'artifacts', appId, 'public', 'data', 'reports', id);
                 await updateDoc(ref, { likes: increment(1) });
-            } catch (e) {}
+            } catch (e) {
+                console.error("Like error:", e);
+            }
         };
 
         window.handleComment = async (id) => {
@@ -262,17 +279,27 @@
 
             try {
                 await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'comments'), {
-                    reportId: id, name, text, createdAt: new Date().toISOString()
+                    reportId: id, 
+                    name, 
+                    text, 
+                    createdAt: new Date().toISOString(),
+                    userId: currentUser.uid
                 });
                 commentInput.value = '';
                 renderApp();
-            } catch (e) {}
+            } catch (e) {
+                console.error("Comment error:", e);
+            }
         };
 
         window.handleDelete = async (id) => {
             if (confirm("Hapus laporan ini?")) {
-                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reports', id));
-                showToast('Dihapus');
+                try {
+                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reports', id));
+                    showToast('Laporan dihapus');
+                } catch(e) {
+                    showToast('Gagal menghapus');
+                }
             }
         };
 
@@ -446,6 +473,7 @@
             lucide.createIcons();
         };
 
+        // Initialize Everything
         initAuth();
     </script>
 </body>
