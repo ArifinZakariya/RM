@@ -29,7 +29,7 @@
         body { background-color: #f8fafc; font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; overflow-x: hidden; }
         .nav-btn { padding: 10px 20px; border-radius: 14px; color: #94a3b8; transition: all 0.3s; }
         .nav-btn.active { background-color: white; color: #059669; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
-        #loading { transition: opacity 0.5s ease; }
+        #loading { transition: opacity 0.5s ease; opacity: 1; display: flex; }
         
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -43,8 +43,8 @@
             <div class="relative w-20 h-20 flex items-center justify-center">
                 <div class="absolute inset-0 border-4 border-emerald-50 rounded-full"></div>
                 <div class="absolute inset-0 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-                <div class="w-10 h-10 overflow-hidden rounded-xl">
-                    <img src="https://img.sanishtech.com/u/b4b2625dd6eb1438fbc393468d2ee7bf.png" class="w-full h-full object-contain">
+                <div class="w-10 h-10 overflow-hidden rounded-xl bg-gray-100 flex items-center justify-center">
+                    <img src="https://img.sanishtech.com/u/b4b2625dd6eb1438fbc393468d2ee7bf.png" alt="Logo" class="w-full h-full object-contain" onerror="this.style.display='none'">
                 </div>
             </div>
             <div class="mt-6 text-center">
@@ -59,11 +59,11 @@
     <script type="module">
         import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 
-        // --- Configuration (GANTI DENGAN MILIK ANDA) ---
-        const SUPABASE_URL = 'https://YOUR_PROJECT_ID.supabase.co'
-        const SUPABASE_KEY = 'YOUR_ANON_KEY'
-        const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
-
+        // --- Configuration Updated ---
+        const SUPABASE_URL = 'https://dphnwhleycntavygvbfh.supabase.co';
+        const SUPABASE_KEY = 'sb_publishable_M1MU0BBL70olr7dFKDgeDg_Q5iQQRUn';
+        
+        const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
         const LOGO_URL = "https://img.sanishtech.com/u/b4b2625dd6eb1438fbc393468d2ee7bf.png";
 
         // --- State ---
@@ -77,49 +77,38 @@
         let myName = localStorage.getItem('al_ihsan_user_name') || "";
         let isLoadingData = true;
 
-        // --- Data Logic (Supabase) ---
+        // --- Data Logic ---
 
         const fetchData = async () => {
             try {
-                const { data: initialReports, error: rError } = await supabase
-                    .from('reports')
-                    .select('*')
-                    .order('createdAt', { ascending: false });
-                
-                const { data: initialComments, error: cError } = await supabase
-                    .from('comments')
-                    .select('*');
+                const [rResponse, cResponse] = await Promise.all([
+                    supabase.from('reports').select('*').order('createdAt', { ascending: false }),
+                    supabase.from('comments').select('*')
+                ]);
 
-                if (rError || cError) throw (rError || cError);
+                if (rResponse.error) throw rResponse.error;
+                if (cResponse.error) throw cResponse.error;
 
-                reports = initialReports || [];
-                comments = initialComments || [];
-                isLoadingData = false;
-                renderApp();
-                hideLoader();
+                reports = rResponse.data || [];
+                comments = cResponse.data || [];
             } catch (err) {
                 console.error("Fetch Error:", err);
+                showToast('Koneksi database bermasalah.');
+            } finally {
+                isLoadingData = false;
+                renderApp();
                 hideLoader();
             }
         };
 
         const setupRealtime = () => {
-            // Monitor Tabel Reports
-            supabase.channel('public:reports')
+            supabase.channel('schema-db-changes')
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, payload => {
-                    if (payload.eventType === 'INSERT') {
-                        reports = [payload.new, ...reports];
-                    } else if (payload.eventType === 'UPDATE') {
-                        reports = reports.map(r => r.id === payload.new.id ? payload.new : r);
-                    } else if (payload.eventType === 'DELETE') {
-                        reports = reports.filter(r => r.id !== payload.old.id);
-                    }
+                    if (payload.eventType === 'INSERT') reports = [payload.new, ...reports];
+                    if (payload.eventType === 'UPDATE') reports = reports.map(r => r.id === payload.new.id ? payload.new : r);
+                    if (payload.eventType === 'DELETE') reports = reports.filter(r => r.id !== payload.old.id);
                     renderApp();
                 })
-                .subscribe();
-
-            // Monitor Tabel Comments
-            supabase.channel('public:comments')
                 .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'comments' }, payload => {
                     comments = [...comments, payload.new];
                     renderApp();
@@ -139,11 +128,7 @@
 
         window.handleFileChange = (e) => {
             const files = Array.from(e.target.files);
-            if (files.length > 5) {
-                showToast('Maksimal 5 foto!');
-                e.target.value = "";
-                return;
-            }
+            if (files.length > 5) { showToast('Maksimal 5 foto!'); e.target.value = ""; return; }
             currentSelectedFiles = files;
             selectedFilePreviews.forEach(url => URL.revokeObjectURL(url));
             selectedFilePreviews = files.map(file => URL.createObjectURL(file));
@@ -175,9 +160,8 @@
             e.preventDefault();
             const btn = document.getElementById('btn-upload');
             if (currentSelectedFiles.length === 0) { showToast('Pilih foto dulu!'); return; }
-
             btn.disabled = true;
-            btn.innerHTML = `Mengompres & Mengunggah...`;
+            btn.innerHTML = `Memproses...`;
 
             try {
                 const imageUrls = [];
@@ -185,7 +169,6 @@
                     const base64 = await compressImage(file);
                     imageUrls.push(base64);
                 }
-
                 const formData = new FormData(e.target);
                 const { error } = await supabase.from('reports').insert([{
                     date: formData.get('date'),
@@ -195,7 +178,6 @@
                     likes: 0,
                     createdAt: new Date().toISOString()
                 }]);
-
                 if (error) throw error;
                 showToast('Laporan diterbitkan!');
                 window.setTab('home');
@@ -210,11 +192,7 @@
 
         window.handleLike = async (id) => {
             const report = reports.find(r => r.id === id);
-            const { error } = await supabase
-                .from('reports')
-                .update({ likes: (report.likes || 0) + 1 })
-                .eq('id', id);
-            if (error) console.error(error);
+            await supabase.from('reports').update({ likes: (report.likes || 0) + 1 }).eq('id', id);
         };
 
         window.handleComment = async (id) => {
@@ -222,15 +200,10 @@
             const commentInput = document.getElementById(`comment-input-${id}`);
             const name = nameInput ? nameInput.value.trim() : myName;
             const text = commentInput.value.trim();
-
             if (!name || !text) return;
             if (!myName) { myName = name; localStorage.setItem('al_ihsan_user_name', name); }
-
-            const { error } = await supabase.from('comments').insert([{
-                reportId: id, name, text, createdAt: new Date().toISOString()
-            }]);
-            
-            if (!error) commentInput.value = '';
+            await supabase.from('comments').insert([{ reportId: id, name, text, createdAt: new Date().toISOString() }]);
+            commentInput.value = '';
         };
 
         window.handleDelete = async (id) => {
@@ -264,7 +237,7 @@
             t.className = 'toast-notif fixed bottom-24 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full text-[10px] font-black uppercase tracking-widest z-[250] animate-bounce-short border border-white/10 shadow-2xl';
             t.innerText = msg;
             document.body.appendChild(t);
-            setTimeout(() => t.remove(), 2500);
+            setTimeout(() => { if(t) t.remove(); }, 2500);
         }
 
         // --- UI Components ---
@@ -274,7 +247,7 @@
                 <nav class="bg-white/80 backdrop-blur-xl border-b border-gray-100 sticky top-0 z-50">
                     <div class="max-w-4xl mx-auto px-6 h-20 flex items-center justify-between">
                         <div class="flex items-center gap-3 cursor-pointer" onclick="window.setTab('home')">
-                            <img src="${LOGO_URL}" class="w-9 h-9 object-contain">
+                            <img src="${LOGO_URL}" class="w-9 h-9 object-contain" onerror="this.style.display='none'">
                             <div class="flex flex-col">
                                 <h1 class="font-black text-gray-900 leading-none text-base tracking-tight shimmer-effect uppercase">AL IHSAN</h1>
                                 <p class="text-[7px] text-emerald-600 font-black uppercase tracking-widest mt-1 leading-none">Gusdurian</p>
@@ -300,7 +273,7 @@
                             </div>
                         `).join('')}
                     </div>
-                    ${images.length > 1 ? `<div class="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/30 backdrop-blur-md text-white text-[8px] px-3 py-1 rounded-full font-black uppercase tracking-widest pointer-events-none border border-white/10">Geser <i data-lucide="arrow-right" class="w-2 h-2 inline ml-1"></i></div>` : ''}
+                    ${images.length > 1 ? `<div class="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/30 backdrop-blur-md text-white text-[8px] px-3 py-1 rounded-full font-black uppercase tracking-widest pointer-events-none border border-white/10 flex items-center gap-1">Geser <i data-lucide="arrow-right" class="w-2.5 h-2.5"></i></div>` : ''}
                 </div>
             `;
         }
@@ -350,7 +323,9 @@
             if (!container) return;
             let html = Navbar();
 
-            if (activeTab === 'home') {
+            if (isLoadingData) {
+                html += `<div class="py-20 text-center flex flex-col items-center"><div class="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4"></div><p class="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Sinkronisasi Cloud...</p></div>`;
+            } else if (activeTab === 'home') {
                 const filtered = reports.filter(r => (r.tema + r.description).toLowerCase().includes(searchTerm));
                 html += `
                     <div class="max-w-xl mx-auto px-5 py-8">
@@ -361,7 +336,6 @@
                                 <input type="text" oninput="window.handleSearch(event)" placeholder="Cari laporan..." class="w-full bg-white border border-gray-100 rounded-2xl py-3.5 pl-12 pr-4 text-xs shadow-sm outline-none focus:ring-2 focus:ring-emerald-500">
                             </div>
                         </div>
-                        ${isLoadingData ? `<div class="py-20 text-center"><div class="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto"></div></div>` : ''}
                         <div class="feed">${filtered.map((r, i) => ReportCard(r, i)).join('')}</div>
                     </div>
                 `;
@@ -370,8 +344,8 @@
                     html += `
                         <div class="max-w-xs mx-auto py-24 px-5">
                             <div class="bg-white p-8 rounded-[3rem] shadow-xl text-center border border-gray-100">
-                                <h2 class="font-black text-xl mb-6 tracking-tight uppercase tracking-widest">Akses Pengurus</h2>
-                                <input type="password" id="admin-pass" placeholder="KODE AKSES" class="w-full bg-gray-50 rounded-xl p-4 text-center text-xl font-black mb-4 outline-none focus:ring-2 focus:ring-emerald-500">
+                                <h2 class="font-black text-xl mb-6 tracking-tight uppercase tracking-widest">Panel Pengurus</h2>
+                                <input type="password" id="admin-pass" placeholder="KODE AKSES" class="w-full bg-gray-50 rounded-xl p-4 text-center text-xl font-black mb-4 outline-none focus:ring-2 focus:ring-emerald-500 tracking-[0.2em]">
                                 <button onclick="window.checkAdmin()" class="w-full bg-emerald-600 text-white font-black py-4 rounded-xl shadow-lg text-xs tracking-widest uppercase">Verifikasi</button>
                             </div>
                         </div>
@@ -408,6 +382,7 @@
         };
 
         // --- Init ---
+        renderApp();
         fetchData();
         setupRealtime();
     </script>
