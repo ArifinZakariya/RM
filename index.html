@@ -41,9 +41,8 @@
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         
-        input, textarea { font-size: 16px !important; } 
+        input, textarea, select { font-size: 16px !important; } 
 
-        /* Paragraf formatting - Justify & Typography */
         .description-text {
             line-height: 1.8;
             letter-spacing: 0.01em;
@@ -52,7 +51,7 @@
             text-align: justify;
             text-justify: inter-word;
             color: #334155;
-            text-indent: 0 !important; /* Menghapus menjorok ke dalam */
+            text-indent: 0 !important;
         }
 
         .title-font {
@@ -77,7 +76,8 @@
                 <div class="absolute inset-0 border-4 border-emerald-50 rounded-full"></div>
                 <div class="absolute inset-0 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
                 <div class="w-10 h-10 overflow-hidden rounded-xl bg-gray-100 flex items-center justify-center">
-                    <img src="https://ik.imagekit.io/fj6r21png/Gemini_Generated_Image_nnglyxnnglyxnngl.png" alt="Logo" class="w-full h-full object-contain">
+                    <!-- Logo Baru di Layar Loading -->
+                    <img id="loader-logo" src="https://ik.imagekit.io/fj6r21png/Gemini_Generated_Image_nnglyxnnglyxnngl.png" alt="Logo" class="w-full h-full object-contain">
                 </div>
             </div>
             <div class="mt-6 text-center">
@@ -96,26 +96,37 @@
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRwaG53aGxleWNudGF2eWd2YmZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxODQ5NTAsImV4cCI6MjA4ODc2MDk1MH0.ezXfcfR5kKMXyIL0IhRCPBSVf0Gf_Crlco62jxhiU-Q';
         
         const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+        
+        // Link Logo Baru (Direct Link ImageKit)
         const LOGO_URL = "https://ik.imagekit.io/fj6r21png/Gemini_Generated_Image_nnglyxnnglyxnngl.png";
 
         // --- Global State ---
         let isAdmin = false;
-        let activeTab = 'home'; // home, admin, detail, about
+        let activeTab = 'home';
         let selectedPostId = null;
         let isEditMode = false;
         let editData = null;
         let reports = [];
         let comments = [];
-        let searchTerm = "";
+        
+        // State Filter
+        let filterMonth = "all";
+        let filterYear = "all";
+        
         let selectedFilePreviews = [];
         let currentSelectedFiles = [];
         let myName = localStorage.getItem('al_ihsan_user_name') || "";
         let isLoadingData = true;
 
+        const monthsName = [
+            "Januari", "Februari", "Maret", "April", "Mei", "Juni", 
+            "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+        ];
+
         const fetchData = async () => {
             try {
                 const [rResp, cResp] = await Promise.all([
-                    supabase.from('reports').select('*').order('createdAt', { ascending: false }),
+                    supabase.from('reports').select('*').order('date', { ascending: false }),
                     supabase.from('comments').select('*')
                 ]);
                 reports = rResp.data || [];
@@ -190,16 +201,12 @@
             e.preventDefault();
             const btn = document.getElementById('btn-upload');
             const formData = new FormData(e.target);
-            
             btn.disabled = true;
             btn.innerHTML = `<span class="flex items-center gap-2 justify-center"><div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Memproses...</span>`;
-            
             try {
                 let imageUrls = isEditMode ? [...editData.images] : [];
-
                 if (currentSelectedFiles.length > 0) {
                     if (!isEditMode) imageUrls = []; 
-                    
                     for (let i = 0; i < currentSelectedFiles.length; i++) {
                         const file = currentSelectedFiles[i];
                         btn.innerHTML = `<span class="flex items-center gap-2 justify-center"><div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Mengirim Foto ${i+1}...</span>`;
@@ -211,7 +218,6 @@
                         if (urlData?.publicUrl) imageUrls.push(urlData.publicUrl);
                     }
                 }
-
                 if (isEditMode) {
                     const { error: dbError } = await supabase.from('reports').update({
                         date: formData.get('date'),
@@ -233,7 +239,6 @@
                     if (dbError) throw dbError;
                     showToast('Laporan berhasil terbit!');
                 }
-
                 currentSelectedFiles = [];
                 selectedFilePreviews = [];
                 isEditMode = false;
@@ -304,7 +309,9 @@
             window.scrollTo({top: 0, behavior: 'smooth'});
         };
 
-        window.handleSearch = (e) => { searchTerm = e.target.value.toLowerCase(); renderApp(); };
+        window.handleFilterMonth = (e) => { filterMonth = e.target.value; renderApp(); };
+        window.handleFilterYear = (e) => { filterYear = e.target.value; renderApp(); };
+
         window.checkAdmin = () => {
             const pass = document.getElementById('admin-pass').value;
             if (pass.toLowerCase() === 'gusdurian') { isAdmin = true; renderApp(); }
@@ -327,6 +334,7 @@
                 <nav class="bg-white/80 backdrop-blur-xl border-b border-gray-100 sticky top-0 z-50">
                     <div class="max-w-4xl mx-auto px-6 h-20 flex items-center justify-between">
                         <div class="flex items-center gap-3 cursor-pointer" onclick="window.setTab('home')">
+                            <!-- Logo Navbar -->
                             <img src="${LOGO_URL}" class="w-9 h-9 object-contain">
                             <div class="flex flex-col hidden sm:block">
                                 <h1 class="font-black text-gray-900 leading-none text-base title-font shimmer-effect uppercase tracking-tighter">AL IHSAN</h1>
@@ -372,12 +380,11 @@
             const rComments = comments.filter(c => c.reportId == report.id);
             const desc = report.description || "";
             const isLong = desc.length > 120;
-            
             return `
                 <div class="bg-white border border-gray-100 rounded-[2.2rem] p-5 mb-6 shadow-sm animate-slide-up" style="animation-delay: ${index * 80}ms">
                     <div class="flex justify-between items-start mb-4">
                         <div>
-                            <p class="text-[8px] font-black text-emerald-600 uppercase tracking-widest mb-0.5">Laporan Baru</p>
+                            <p class="text-[8px] font-black text-emerald-600 uppercase tracking-widest mb-0.5">Laporan Kegiatan</p>
                             <p class="text-[9px] font-bold text-gray-400 uppercase tracking-tighter">${new Date(report.date).toLocaleDateString('id-ID', { dateStyle: 'long' })}</p>
                         </div>
                         <div class="flex gap-1">
@@ -416,7 +423,6 @@
                         <i data-lucide="chevron-left" class="w-4 h-4"></i>
                         <span class="text-[10px] font-black uppercase tracking-widest">Kembali</span>
                     </button>
-                    
                     <div class="bg-white rounded-[2.5rem] border border-gray-100 overflow-hidden shadow-sm p-6 mb-6">
                         <div class="flex justify-between items-start mb-6">
                             <div class="pr-4 flex-1">
@@ -431,13 +437,10 @@
                                 </div>
                             ` : ''}
                         </div>
-
                         ${ImageSlider(report.images, true)}
-
                         <div class="description-text text-[15px] mb-8">
                             ${report.description}
                         </div>
-
                         <div class="flex items-center gap-4 border-t border-gray-50 pt-6">
                              <button onclick="window.handleLike('${report.id}')" class="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-emerald-50 text-emerald-600 active:scale-90 transition-all border border-emerald-100">
                                 <i data-lucide="heart" class="w-4 h-4 ${report.likes > 0 ? 'fill-emerald-600' : ''}"></i>
@@ -445,7 +448,6 @@
                             </button>
                         </div>
                     </div>
-
                     <div class="bg-white rounded-[2.5rem] border border-gray-100 p-6 shadow-sm">
                         <h3 class="text-sm font-black text-gray-900 mb-6 uppercase tracking-widest border-b border-gray-100 pb-4">${rComments.length} Tanggapan</h3>
                         <div class="space-y-4 mb-8">
@@ -459,7 +461,6 @@
                                 </div>
                             `).join('') : '<p class="text-center text-gray-400 text-[10px] font-bold py-10 uppercase tracking-widest">Belum ada komentar</p>'}
                         </div>
-
                         <div class="bg-gray-100 rounded-2xl p-4 space-y-3">
                             <p class="text-[8px] font-black text-gray-400 uppercase tracking-widest ml-1">Berikan Tanggapan</p>
                             ${!myName ? `<input type="text" id="name-input-${report.id}" placeholder="Nama Anda" class="w-full bg-white rounded-xl px-4 py-3 text-sm font-bold border-none outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm">` : ''}
@@ -478,59 +479,38 @@
                 <div class="max-w-xl mx-auto px-4 py-6 animate-slide-up">
                     <div class="text-center mb-10">
                         <div class="w-24 h-24 bg-white rounded-3xl shadow-xl flex items-center justify-center mx-auto mb-6 p-4 border border-gray-50">
+                            <!-- Logo Halaman Tentang -->
                             <img src="${LOGO_URL}" class="w-full h-full object-contain">
                         </div>
                         <h2 class="text-2xl font-black title-font text-gray-900 uppercase tracking-tight">Rumah Belajar Al Ihsan</h2>
                         <p class="text-[10px] font-black text-emerald-600 uppercase tracking-[0.3em] mt-2">Gusdurian Mojokerto</p>
                     </div>
-
                     <div class="bg-white rounded-[2.5rem] p-8 border border-gray-100 shadow-sm mb-6">
                         <h3 class="text-sm font-black text-gray-900 mb-4 uppercase tracking-widest flex items-center gap-2">
                             <i data-lucide="info" class="w-4 h-4 text-emerald-500"></i> Tentang Kami
                         </h3>
                         <div class="description-text text-[14px]">
 Rumah Belajar Al Ihsan merupakan inisiatif pendidikan non-formal di bawah naungan komunitas Gusdurian Mojokerto. Kami berfokus pada pendampingan belajar gratis bagi anak-anak dengan mengedepankan nilai-nilai toleransi, kemanusiaan, dan kecintaan pada ilmu pengetahuan.
-
-Melalui portal ini, kami berupaya mendokumentasikan setiap senyum dan langkah kecil para relawan dalam mewujudkan masa depan anak bangsa yang lebih cerah.
                         </div>
                     </div>
-
                     <div class="bg-white rounded-[2.5rem] p-8 border border-gray-100 shadow-sm">
                         <h3 class="text-sm font-black text-gray-900 mb-6 uppercase tracking-widest border-b border-gray-50 pb-4 flex items-center gap-2">
                             <i data-lucide="message-square" class="w-4 h-4 text-emerald-500"></i> Hubungi Kami
                         </h3>
-                        
                         <div class="grid grid-cols-1 gap-4">
                             <a href="https://www.instagram.com/gusdurian_mojokerto" target="_blank" class="contact-card flex items-center gap-4 bg-gray-50 p-4 rounded-2xl">
-                                <div class="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center text-pink-600">
-                                    <i data-lucide="instagram" class="w-6 h-6"></i>
-                                </div>
-                                <div>
-                                    <p class="text-[8px] font-black text-gray-400 uppercase tracking-widest leading-none mb-1">Instagram</p>
-                                    <p class="text-sm font-black text-gray-800">@gusdurianmojokerto</p>
-                                </div>
+                                <div class="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center text-pink-600"><i data-lucide="instagram" class="w-6 h-6"></i></div>
+                                <div><p class="text-[8px] font-black text-gray-400 uppercase tracking-widest leading-none mb-1">Instagram</p><p class="text-sm font-black text-gray-800">@gusdurian_mojokerto</p></div>
                                 <i data-lucide="external-link" class="w-4 h-4 text-gray-300 ml-auto"></i>
                             </a>
-
                             <a href="mailto:alihsanrumahbelajar@gmail.com" class="contact-card flex items-center gap-4 bg-gray-50 p-4 rounded-2xl">
-                                <div class="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center text-emerald-600">
-                                    <i data-lucide="mail" class="w-6 h-6"></i>
-                                </div>
-                                <div>
-                                    <p class="text-[8px] font-black text-gray-400 uppercase tracking-widest leading-none mb-1">Email</p>
-                                    <p class="text-sm font-black text-gray-800">alihsanrumahbelajar@gmail.com</p>
-                                </div>
+                                <div class="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center text-emerald-600"><i data-lucide="mail" class="w-6 h-6"></i></div>
+                                <div><p class="text-[8px] font-black text-gray-400 uppercase tracking-widest leading-none mb-1">Email</p><p class="text-sm font-black text-gray-800">alihsanrumahbelajar@gmail.com</p></div>
                                 <i data-lucide="chevron-right" class="w-4 h-4 text-gray-300 ml-auto"></i>
                             </a>
-
                             <a href="https://wa.me/6285961567378" target="_blank" class="contact-card flex items-center gap-4 bg-gray-50 p-4 rounded-2xl border-2 border-emerald-100">
-                                <div class="w-12 h-12 bg-emerald-500 rounded-xl shadow-sm flex items-center justify-center text-white">
-                                    <i data-lucide="phone" class="w-6 h-6"></i>
-                                </div>
-                                <div>
-                                    <p class="text-[8px] font-black text-emerald-600 uppercase tracking-widest leading-none mb-1">WhatsApp Direktur</p>
-                                    <p class="text-sm font-black text-gray-800">+62 859-6156-7378</p>
-                                </div>
+                                <div class="w-12 h-12 bg-emerald-500 rounded-xl shadow-sm flex items-center justify-center text-white"><i data-lucide="phone" class="w-6 h-6"></i></div>
+                                <div><p class="text-[8px] font-black text-emerald-600 uppercase tracking-widest leading-none mb-1">WhatsApp Direktur</p><p class="text-sm font-black text-gray-800">Penggerak Gusdurian</p></div>
                                 <div class="ml-auto bg-emerald-500 text-white text-[8px] font-black px-2 py-1 rounded-md uppercase tracking-tight">Chat</div>
                             </a>
                         </div>
@@ -543,21 +523,45 @@ Melalui portal ini, kami berupaya mendokumentasikan setiap senyum dan langkah ke
             const container = document.getElementById('app');
             if (!container) return;
             let html = Navbar();
-
             if (isLoadingData) {
                 html += `<div class="py-20 text-center flex flex-col items-center"><div class="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4"></div><p class="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Sinkronisasi Cloud...</p></div>`;
             } else if (activeTab === 'home') {
-                const filtered = reports.filter(r => (r.tema + r.description).toLowerCase().includes(searchTerm));
+                const filtered = reports.filter(r => {
+                    const d = new Date(r.date);
+                    const m = (d.getMonth() + 1).toString();
+                    const y = d.getFullYear().toString();
+                    const matchMonth = filterMonth === "all" || filterMonth === m;
+                    const matchYear = filterYear === "all" || filterYear === y;
+                    return matchMonth && matchYear;
+                });
+                const years = [...new Set(reports.map(r => new Date(r.date).getFullYear()))].sort((a, b) => b - a);
                 html += `
                     <div class="max-w-xl mx-auto px-4 py-6">
                         <div class="text-center mb-8">
-                            <h2 class="text-2xl font-black mb-4 title-font shimmer-effect leading-tight uppercase tracking-tighter">Mewujudkan Senyum<br>Anak Bangsa</h2>
-                            <div class="relative max-w-sm mx-auto">
-                                <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300 w-4 h-4"></i>
-                                <input type="text" oninput="window.handleSearch(event)" placeholder="Cari laporan..." class="w-full bg-white border border-gray-100 rounded-2xl py-3 pl-11 pr-4 text-xs shadow-sm outline-none focus:ring-2 focus:ring-emerald-500">
+                            <h2 class="text-2xl font-black mb-6 title-font shimmer-effect leading-tight uppercase tracking-tighter">Arsip Kegiatan</h2>
+                            <div class="bg-white border border-gray-100 p-2 rounded-2xl shadow-sm flex gap-2">
+                                <div class="flex-1 relative">
+                                    <select onchange="window.handleFilterMonth(event)" class="w-full bg-gray-50 border-none rounded-xl py-3 pl-4 pr-10 text-[11px] font-black uppercase tracking-widest appearance-none outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer">
+                                        <option value="all">Semua Bulan</option>
+                                        ${monthsName.map((m, i) => `<option value="${i+1}" ${filterMonth == (i+1) ? 'selected' : ''}>${m}</option>`).join('')}
+                                    </select>
+                                    <i data-lucide="chevron-down" class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"></i>
+                                </div>
+                                <div class="flex-1 relative">
+                                    <select onchange="window.handleFilterYear(event)" class="w-full bg-gray-50 border-none rounded-xl py-3 pl-4 pr-10 text-[11px] font-black uppercase tracking-widest appearance-none outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer">
+                                        <option value="all">Semua Tahun</option>
+                                        ${years.map(y => `<option value="${y}" ${filterYear == y ? 'selected' : ''}>${y}</option>`).join('')}
+                                    </select>
+                                    <i data-lucide="chevron-down" class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"></i>
+                                </div>
                             </div>
+                            ${filterMonth !== 'all' || filterYear !== 'all' ? `
+                                <p class="mt-4 text-[9px] font-black text-emerald-600 uppercase tracking-widest">
+                                    Menampilkan ${filtered.length} Laporan
+                                </p>
+                            ` : ''}
                         </div>
-                        <div class="feed">${filtered.length ? filtered.map((r, i) => ReportCard(r, i)).join('') : '<p class="text-center text-gray-400 text-xs py-10 font-black uppercase tracking-widest animate-pulse">Laporan Tidak Ditemukan</p>'}</div>
+                        <div class="feed">${filtered.length ? filtered.map((r, i) => ReportCard(r, i)).join('') : '<div class="py-20 text-center"><i data-lucide="archive-x" class="w-10 h-10 text-gray-200 mx-auto mb-4"></i><p class="text-gray-400 text-[10px] font-black uppercase tracking-widest">Tidak ada laporan di periode ini</p></div>'}</div>
                     </div>
                 `;
             } else if (activeTab === 'detail') {
@@ -585,7 +589,7 @@ Melalui portal ini, kami berupaya mendokumentasikan setiap senyum dan langkah ke
                                 <button onclick="window.logoutAdmin()" class="text-red-500 text-[8px] font-black uppercase tracking-widest px-2.5 py-1 bg-red-50 rounded-lg">Keluar</button>
                             </div>
                             <form onsubmit="window.handleUpload(event)" class="bg-white p-6 rounded-[2.2rem] shadow-xl space-y-5 border border-gray-100">
-                                <div class="bg-emerald-50/30 p-6 rounded-[1.8rem] border-2 border-dashed border-emerald-100 text-center relative transition-colors hover:bg-emerald-50/50">
+                                <div class="bg-emerald-50/30 p-6 rounded-[1.8rem] border-2 border-dashed border-emerald-100 text-center relative">
                                     <input type="file" id="files" multiple accept="image/*" class="hidden" onchange="window.handleFileChange(event)">
                                     <label for="files" class="cursor-pointer block">
                                         <div class="w-10 h-10 bg-white text-emerald-600 rounded-xl flex items-center justify-center mx-auto mb-2 shadow-sm"><i data-lucide="image-plus" class="w-5 h-5"></i></div>
