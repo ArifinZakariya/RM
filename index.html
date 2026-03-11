@@ -59,14 +59,14 @@
     <script type="module">
         import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 
-        // --- Configuration Updated ---
+        // --- Supabase Config Updated ---
         const SUPABASE_URL = 'https://dphnwhleycntavygvbfh.supabase.co';
-        const SUPABASE_KEY = 'sb_publishable_M1MU0BBL70olr7dFKDgeDg_Q5iQQRUn';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRwaG53aGxleWNudGF2eWd2YmZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxODQ5NTAsImV4cCI6MjA4ODc2MDk1MH0.ezXfcfR5kKMXyIL0IhRCPBSVf0Gf_Crlco62jxhiU-Q';
         
         const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
         const LOGO_URL = "https://img.sanishtech.com/u/b4b2625dd6eb1438fbc393468d2ee7bf.png";
 
-        // --- State ---
+        // --- Global State ---
         let isAdmin = false;
         let activeTab = 'home';
         let reports = [];
@@ -77,23 +77,22 @@
         let myName = localStorage.getItem('al_ihsan_user_name') || "";
         let isLoadingData = true;
 
-        // --- Data Logic ---
-
+        // --- Data Fetching ---
         const fetchData = async () => {
             try {
-                const [rResponse, cResponse] = await Promise.all([
+                const [rResp, cResp] = await Promise.all([
                     supabase.from('reports').select('*').order('createdAt', { ascending: false }),
                     supabase.from('comments').select('*')
                 ]);
 
-                if (rResponse.error) throw rResponse.error;
-                if (cResponse.error) throw cResponse.error;
+                if (rResp.error) throw rResp.error;
+                if (cResp.error) throw cResp.error;
 
-                reports = rResponse.data || [];
-                comments = cResponse.data || [];
+                reports = rResp.data || [];
+                comments = cResp.data || [];
             } catch (err) {
                 console.error("Fetch Error:", err);
-                showToast('Koneksi database bermasalah.');
+                showToast('Koneksi Supabase gagal.');
             } finally {
                 isLoadingData = false;
                 renderApp();
@@ -102,7 +101,7 @@
         };
 
         const setupRealtime = () => {
-            supabase.channel('schema-db-changes')
+            supabase.channel('db-changes')
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, payload => {
                     if (payload.eventType === 'INSERT') reports = [payload.new, ...reports];
                     if (payload.eventType === 'UPDATE') reports = reports.map(r => r.id === payload.new.id ? payload.new : r);
@@ -125,7 +124,6 @@
         };
 
         // --- Handlers ---
-
         window.handleFileChange = (e) => {
             const files = Array.from(e.target.files);
             if (files.length > 5) { showToast('Maksimal 5 foto!'); e.target.value = ""; return; }
@@ -161,7 +159,7 @@
             const btn = document.getElementById('btn-upload');
             if (currentSelectedFiles.length === 0) { showToast('Pilih foto dulu!'); return; }
             btn.disabled = true;
-            btn.innerHTML = `Memproses...`;
+            btn.innerHTML = `Mengunggah...`;
 
             try {
                 const imageUrls = [];
@@ -179,10 +177,10 @@
                     createdAt: new Date().toISOString()
                 }]);
                 if (error) throw error;
-                showToast('Laporan diterbitkan!');
+                showToast('Berhasil terbit!');
                 window.setTab('home');
             } catch (err) {
-                showToast('Gagal terbit!');
+                showToast('Gagal upload!');
                 console.error(err);
             } finally {
                 btn.disabled = false;
@@ -196,14 +194,14 @@
         };
 
         window.handleComment = async (id) => {
-            const nameInput = document.getElementById(`name-input-${id}`);
-            const commentInput = document.getElementById(`comment-input-${id}`);
-            const name = nameInput ? nameInput.value.trim() : myName;
-            const text = commentInput.value.trim();
+            const nInput = document.getElementById(`name-input-${id}`);
+            const cInput = document.getElementById(`comment-input-${id}`);
+            const name = nInput ? nInput.value.trim() : myName;
+            const text = cInput.value.trim();
             if (!name || !text) return;
             if (!myName) { myName = name; localStorage.setItem('al_ihsan_user_name', name); }
             await supabase.from('comments').insert([{ reportId: id, name, text, createdAt: new Date().toISOString() }]);
-            commentInput.value = '';
+            cInput.value = '';
         };
 
         window.handleDelete = async (id) => {
@@ -241,7 +239,6 @@
         }
 
         // --- UI Components ---
-
         function Navbar() {
             return `
                 <nav class="bg-white/80 backdrop-blur-xl border-b border-gray-100 sticky top-0 z-50">
@@ -249,7 +246,7 @@
                         <div class="flex items-center gap-3 cursor-pointer" onclick="window.setTab('home')">
                             <img src="${LOGO_URL}" class="w-9 h-9 object-contain" onerror="this.style.display='none'">
                             <div class="flex flex-col">
-                                <h1 class="font-black text-gray-900 leading-none text-base tracking-tight shimmer-effect uppercase">AL IHSAN</h1>
+                                <h1 class="font-black text-gray-900 leading-none text-base tracking-tight shimmer-effect uppercase tracking-tighter">AL IHSAN</h1>
                                 <p class="text-[7px] text-emerald-600 font-black uppercase tracking-widest mt-1 leading-none">Gusdurian</p>
                             </div>
                         </div>
