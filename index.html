@@ -44,7 +44,7 @@
                 <div class="absolute inset-0 border-4 border-emerald-50 rounded-full"></div>
                 <div class="absolute inset-0 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
                 <div class="w-10 h-10 overflow-hidden rounded-xl bg-gray-100 flex items-center justify-center">
-                    <img src="https://img.sanishtech.com/u/b4b2625dd6eb1438fbc393468d2ee7bf.png" alt="Logo" class="w-full h-full object-contain" onerror="this.style.display='none'">
+                    <img src="https://img.sanishtech.com/u/b4b2625dd6eb1438fbc393468d2ee7bf.png" alt="Logo" class="w-full h-full object-contain">
                 </div>
             </div>
             <div class="mt-6 text-center">
@@ -59,7 +59,6 @@
     <script type="module">
         import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 
-        // --- Supabase Config Updated ---
         const SUPABASE_URL = 'https://dphnwhleycntavygvbfh.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRwaG53aGxleWNudGF2eWd2YmZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxODQ5NTAsImV4cCI6MjA4ODc2MDk1MH0.ezXfcfR5kKMXyIL0IhRCPBSVf0Gf_Crlco62jxhiU-Q';
         
@@ -84,35 +83,15 @@
                     supabase.from('reports').select('*').order('createdAt', { ascending: false }),
                     supabase.from('comments').select('*')
                 ]);
-
-                if (rResp.error) throw rResp.error;
-                if (cResp.error) throw cResp.error;
-
                 reports = rResp.data || [];
                 comments = cResp.data || [];
             } catch (err) {
                 console.error("Fetch Error:", err);
-                showToast('Koneksi Supabase gagal.');
             } finally {
                 isLoadingData = false;
                 renderApp();
                 hideLoader();
             }
-        };
-
-        const setupRealtime = () => {
-            supabase.channel('db-changes')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, payload => {
-                    if (payload.eventType === 'INSERT') reports = [payload.new, ...reports];
-                    if (payload.eventType === 'UPDATE') reports = reports.map(r => r.id === payload.new.id ? payload.new : r);
-                    if (payload.eventType === 'DELETE') reports = reports.filter(r => r.id !== payload.old.id);
-                    renderApp();
-                })
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'comments' }, payload => {
-                    comments = [...comments, payload.new];
-                    renderApp();
-                })
-                .subscribe();
         };
 
         const hideLoader = () => {
@@ -133,23 +112,20 @@
             renderApp();
         };
 
-        const compressImage = (file) => {
+        // Fungsi kompres sederhana ke Blob agar tidak stuck karena ukuran file
+        const compressImageToBlob = (file) => {
             return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.readAsDataURL(file);
-                reader.onload = (e) => {
-                    const img = new Image();
-                    img.src = e.target.result;
-                    img.onload = () => {
-                        const canvas = document.createElement('canvas');
-                        const MAX_W = 640;
-                        let w = img.width, h = img.height;
-                        if (w > MAX_W) { h *= MAX_W / w; w = MAX_W; }
-                        canvas.width = w; canvas.height = h;
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(img, 0, 0, w, h);
-                        resolve(canvas.toDataURL('image/jpeg', 0.5));
-                    };
+                const img = new Image();
+                img.src = URL.createObjectURL(file);
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const MAX_W = 1000;
+                    let w = img.width, h = img.height;
+                    if (w > MAX_W) { h *= MAX_W / w; w = MAX_W; }
+                    canvas.width = w; canvas.height = h;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, w, h);
+                    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.7);
                 };
             });
         };
@@ -158,17 +134,32 @@
             e.preventDefault();
             const btn = document.getElementById('btn-upload');
             if (currentSelectedFiles.length === 0) { showToast('Pilih foto dulu!'); return; }
+            
+            // Pencegahan Stuck: Gunakan try-catch-finally
             btn.disabled = true;
-            btn.innerHTML = `Mengunggah...`;
+            btn.innerHTML = `<span class="flex items-center gap-2 justify-center"><div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Mengunggah...</span>`;
 
             try {
                 const imageUrls = [];
+
+                // 1. Upload ke Storage (Ganti 'images' dengan nama bucket Anda)
                 for (const file of currentSelectedFiles) {
-                    const base64 = await compressImage(file);
-                    imageUrls.push(base64);
+                    const blob = await compressImageToBlob(file);
+                    const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
+                    
+                    const { data, error: uploadError } = await supabase.storage
+                        .from('images') 
+                        .upload(fileName, blob);
+
+                    if (uploadError) throw uploadError;
+
+                    const { data: urlData } = supabase.storage.from('images').getPublicUrl(fileName);
+                    imageUrls.push(urlData.publicUrl);
                 }
+
+                // 2. Insert ke Tabel Reports
                 const formData = new FormData(e.target);
-                const { error } = await supabase.from('reports').insert([{
+                const { error: dbError } = await supabase.from('reports').insert([{
                     date: formData.get('date'),
                     tema: formData.get('tema'),
                     description: formData.get('description'),
@@ -176,13 +167,22 @@
                     likes: 0,
                     createdAt: new Date().toISOString()
                 }]);
-                if (error) throw error;
+
+                if (dbError) throw dbError;
+
                 showToast('Berhasil terbit!');
-                window.setTab('home');
+                currentSelectedFiles = [];
+                selectedFilePreviews = [];
+                setTimeout(() => {
+                    fetchData();
+                    window.setTab('home');
+                }, 1000);
+
             } catch (err) {
-                showToast('Gagal upload!');
-                console.error(err);
+                console.error("Upload Error:", err);
+                showToast(`Gagal: ${err.message || 'Cek koneksi/RLS'}`);
             } finally {
+                // Pastikan tombol aktif kembali agar tidak stuck
                 btn.disabled = false;
                 btn.innerText = 'Terbitkan Laporan';
             }
@@ -191,6 +191,7 @@
         window.handleLike = async (id) => {
             const report = reports.find(r => r.id === id);
             await supabase.from('reports').update({ likes: (report.likes || 0) + 1 }).eq('id', id);
+            fetchData();
         };
 
         window.handleComment = async (id) => {
@@ -201,19 +202,19 @@
             if (!name || !text) return;
             if (!myName) { myName = name; localStorage.setItem('al_ihsan_user_name', name); }
             await supabase.from('comments').insert([{ reportId: id, name, text, createdAt: new Date().toISOString() }]);
-            cInput.value = '';
+            fetchData();
         };
 
         window.handleDelete = async (id) => {
             if (confirm("Hapus laporan ini?")) {
                 await supabase.from('reports').delete().eq('id', id);
                 showToast('Laporan dihapus');
+                fetchData();
             }
         };
 
         window.setTab = (tab) => {
             activeTab = tab;
-            selectedFilePreviews.forEach(url => URL.revokeObjectURL(url));
             selectedFilePreviews = [];
             currentSelectedFiles = [];
             renderApp();
@@ -235,7 +236,7 @@
             t.className = 'toast-notif fixed bottom-24 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full text-[10px] font-black uppercase tracking-widest z-[250] animate-bounce-short border border-white/10 shadow-2xl';
             t.innerText = msg;
             document.body.appendChild(t);
-            setTimeout(() => { if(t) t.remove(); }, 2500);
+            setTimeout(() => { if(t) t.remove(); }, 3000);
         }
 
         // --- UI Components ---
@@ -244,7 +245,7 @@
                 <nav class="bg-white/80 backdrop-blur-xl border-b border-gray-100 sticky top-0 z-50">
                     <div class="max-w-4xl mx-auto px-6 h-20 flex items-center justify-between">
                         <div class="flex items-center gap-3 cursor-pointer" onclick="window.setTab('home')">
-                            <img src="${LOGO_URL}" class="w-9 h-9 object-contain" onerror="this.style.display='none'">
+                            <img src="${LOGO_URL}" class="w-9 h-9 object-contain">
                             <div class="flex flex-col">
                                 <h1 class="font-black text-gray-900 leading-none text-base tracking-tight shimmer-effect uppercase tracking-tighter">AL IHSAN</h1>
                                 <p class="text-[7px] text-emerald-600 font-black uppercase tracking-widest mt-1 leading-none">Gusdurian</p>
@@ -284,7 +285,7 @@
                             <p class="text-[8px] font-black text-emerald-600 uppercase tracking-widest mb-0.5">Laporan Baru</p>
                             <p class="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">${new Date(report.date).toLocaleDateString('id-ID', { dateStyle: 'long' })}</p>
                         </div>
-                        ${isAdmin ? `<button onclick="window.handleDelete('${report.id}')" class="text-red-200 hover:text-red-500 p-2"><i data-lucide="trash" class="w-4 h-4"></i></button>` : ''}
+                        ${isAdmin ? `<button onclick="window.handleDelete('${report.id}')" class="text-red-300 hover:text-red-500 p-2"><i data-lucide="trash" class="w-4 h-4"></i></button>` : ''}
                     </div>
                     ${ImageSlider(report.images)}
                     <div class="mb-5">
@@ -333,7 +334,7 @@
                                 <input type="text" oninput="window.handleSearch(event)" placeholder="Cari laporan..." class="w-full bg-white border border-gray-100 rounded-2xl py-3.5 pl-12 pr-4 text-xs shadow-sm outline-none focus:ring-2 focus:ring-emerald-500">
                             </div>
                         </div>
-                        <div class="feed">${filtered.map((r, i) => ReportCard(r, i)).join('')}</div>
+                        <div class="feed">${filtered.length ? filtered.map((r, i) => ReportCard(r, i)).join('') : '<p class="text-center text-gray-400 text-xs py-10 font-black uppercase tracking-widest animate-pulse">Belum ada laporan</p>'}</div>
                     </div>
                 `;
             } else if (activeTab === 'admin') {
@@ -379,9 +380,8 @@
         };
 
         // --- Init ---
-        renderApp();
         fetchData();
-        setupRealtime();
     </script>
 </body>
 </html>
+
