@@ -34,20 +34,11 @@
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         
-        input, textarea { font-size: 16px !important; }
-
-        .line-clamp-3 {
-            display: -webkit-box;
-            -webkit-line-clamp: 3;
-            -webkit-box-orient: vertical;  
-            overflow: hidden;
-        }
-        .expanded-text {
-            display: block !important;
-        }
+        input, textarea { font-size: 16px !important; } 
     </style>
 </head>
 <body class="pb-24">
+    <!-- Loader Screen -->
     <div id="loading" class="fixed inset-0 flex items-center justify-center bg-white z-[200]">
         <div class="flex flex-col items-center">
             <div class="relative w-20 h-20 flex items-center justify-center">
@@ -70,7 +61,7 @@
         import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 
         const SUPABASE_URL = 'https://dphnwhleycntavygvbfh.supabase.co';
-        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6BadphnwhleycntavygvbfhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxODQ5NTAsImV4cCI6MjA4ODc2MDk1MH0.ezXfcfR5kKMXyIL0IhRCPBSVf0Gf_Crlco62jxhiU-Q';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRwaG53aGxleWNudGF2eWd2YmZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxODQ5NTAsImV4cCI6MjA4ODc2MDk1MH0.ezXfcfR5kKMXyIL0IhRCPBSVf0Gf_Crlco62jxhiU-Q';
         
         const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
         const LOGO_URL = "https://img.sanishtech.com/u/b4b2625dd6eb1438fbc393468d2ee7bf.png";
@@ -87,7 +78,6 @@
         let myName = localStorage.getItem('al_ihsan_user_name') || "";
         let isLoadingData = true;
 
-        // --- Data Fetching ---
         const fetchData = async () => {
             try {
                 const [rResp, cResp] = await Promise.all([
@@ -113,30 +103,62 @@
             }
         };
 
-        // --- Handlers ---
         window.handleFileChange = (e) => {
-            const files = Array.from(e.target.files);
-            if (files.length > 5) { showToast('Maksimal 5 foto!'); e.target.value = ""; return; }
+            const files = Array.from(e.target.files).filter(f => f.type.startsWith('image/'));
+            if (files.length === 0 && e.target.files.length > 0) {
+                showToast('Pilih file gambar!');
+                e.target.value = "";
+                return;
+            }
+            if (files.length > 5) {
+                showToast('Maksimal 5 foto!');
+                e.target.value = "";
+                return;
+            }
             currentSelectedFiles = files;
             selectedFilePreviews.forEach(url => URL.revokeObjectURL(url));
             selectedFilePreviews = files.map(file => URL.createObjectURL(file));
             renderApp();
         };
 
-        const compressImageToBlob = (file) => {
+        // Fungsi kompresi ultra-stabil dengan mode fallback
+        const processImage = (file) => {
             return new Promise((resolve) => {
-                const img = new Image();
-                img.src = URL.createObjectURL(file);
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    const MAX_W = 1000;
-                    let w = img.width, h = img.height;
-                    if (w > MAX_W) { h *= MAX_W / w; w = MAX_W; }
-                    canvas.width = w; canvas.height = h;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, w, h);
-                    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.7);
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = (readerEvent) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        try {
+                            const canvas = document.createElement('canvas');
+                            const MAX_SIZE = 1000;
+                            let width = img.width;
+                            let height = img.height;
+
+                            if (width > height) {
+                                if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; }
+                            } else {
+                                if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; }
+                            }
+
+                            canvas.width = width;
+                            canvas.height = height;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(img, 0, 0, width, height);
+                            
+                            canvas.toBlob((blob) => {
+                                if (blob) resolve(blob);
+                                else resolve(file); // Fallback ke file asli jika blob gagal
+                            }, 'image/jpeg', 0.8);
+                        } catch (e) {
+                            console.warn("Compression failed, using original:", e);
+                            resolve(file); // Fallback jika canvas error (memory limit)
+                        }
+                    };
+                    img.onerror = () => resolve(file); // Fallback jika image load error
+                    img.src = readerEvent.target.result;
                 };
+                reader.onerror = () => resolve(file); // Fallback jika reader error
             });
         };
 
@@ -146,18 +168,31 @@
             if (currentSelectedFiles.length === 0) { showToast('Pilih foto dulu!'); return; }
             
             btn.disabled = true;
-            btn.innerHTML = `<span class="flex items-center gap-2 justify-center"><div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Mengunggah...</span>`;
+            btn.innerHTML = `<span class="flex items-center gap-2 justify-center"><div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Menyiapkan Data...</span>`;
 
             try {
                 const imageUrls = [];
-                for (const file of currentSelectedFiles) {
-                    const blob = await compressImageToBlob(file);
-                    const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
-                    const { error: uploadError } = await supabase.storage.from('images').upload(fileName, blob);
+
+                for (let i = 0; i < currentSelectedFiles.length; i++) {
+                    const file = currentSelectedFiles[i];
+                    btn.innerHTML = `<span class="flex items-center gap-2 justify-center"><div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Mengirim Foto ${i+1}/${currentSelectedFiles.length}...</span>`;
+                    
+                    // Gunakan fungsi proses baru yang lebih stabil
+                    const finalBlob = await processImage(file);
+                    
+                    const fileName = `al_ihsan_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+                    
+                    const { data, error: uploadError } = await supabase.storage
+                        .from('images') 
+                        .upload(fileName, finalBlob, { contentType: 'image/jpeg', upsert: false });
+
                     if (uploadError) throw uploadError;
+
                     const { data: urlData } = supabase.storage.from('images').getPublicUrl(fileName);
-                    imageUrls.push(urlData.publicUrl);
+                    if (urlData?.publicUrl) imageUrls.push(urlData.publicUrl);
                 }
+
+                btn.innerHTML = `<span class="flex items-center gap-2 justify-center"><div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Menerbitkan...</span>`;
 
                 const formData = new FormData(e.target);
                 const { error: dbError } = await supabase.from('reports').insert([{
@@ -171,18 +206,28 @@
 
                 if (dbError) throw dbError;
 
-                showToast('Berhasil terbit!');
+                showToast('Laporan berhasil terbit!');
                 currentSelectedFiles = [];
                 selectedFilePreviews = [];
-                setTimeout(() => { fetchData(); window.setTab('home'); }, 1000);
+                e.target.reset();
+                
+                setTimeout(() => {
+                    fetchData();
+                    window.setTab('home');
+                }, 800);
 
             } catch (err) {
-                console.error("Upload Error:", err);
-                showToast(`Gagal: ${err.message}`);
-            } finally {
+                console.error("Critical Upload Error:", err);
+                showToast(`Gagal terbit: ${err.message || 'Cek koneksi internet'}`);
                 btn.disabled = false;
                 btn.innerText = 'Terbitkan Laporan';
             }
+        };
+
+        window.toggleDescription = (id) => {
+            if (expandedReports.has(id)) expandedReports.delete(id);
+            else expandedReports.add(id);
+            renderApp();
         };
 
         window.handleLike = async (id) => {
@@ -203,20 +248,11 @@
         };
 
         window.handleDelete = async (id) => {
-            if (confirm("Hapus laporan ini?")) {
+            if (confirm("Hapus laporan ini secara permanen?")) {
                 await supabase.from('reports').delete().eq('id', id);
                 showToast('Laporan dihapus');
                 fetchData();
             }
-        };
-
-        window.toggleDescription = (id) => {
-            if (expandedReports.has(id)) {
-                expandedReports.delete(id);
-            } else {
-                expandedReports.add(id);
-            }
-            renderApp();
         };
 
         window.setTab = (tab) => {
@@ -239,13 +275,12 @@
             const existing = document.querySelector('.toast-notif');
             if (existing) existing.remove();
             const t = document.createElement('div');
-            t.className = 'toast-notif fixed bottom-24 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full text-[10px] font-black uppercase tracking-widest z-[250] animate-bounce-short border border-white/10 shadow-2xl';
+            t.className = 'toast-notif fixed bottom-24 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full text-[10px] font-black uppercase tracking-widest z-[250] animate-bounce-short border border-white/10 shadow-2xl text-center min-w-[220px]';
             t.innerText = msg;
             document.body.appendChild(t);
             setTimeout(() => { if(t) t.remove(); }, 3000);
         }
 
-        // --- UI Components ---
         function Navbar() {
             return `
                 <nav class="bg-white/80 backdrop-blur-xl border-b border-gray-100 sticky top-0 z-50">
@@ -270,14 +305,14 @@
             if (!images || images.length === 0) return '';
             return `
                 <div class="relative w-full mb-5">
-                    <div class="flex overflow-x-auto snap-x snap-mandatory no-scrollbar gap-3 pb-2">
+                    <div class="flex overflow-x-auto snap-x snap-mandatory no-scrollbar gap-2 pb-1">
                         ${images.map(img => `
-                            <div class="flex-none w-full aspect-[4/3] max-h-80 snap-center">
-                                <img src="${img}" class="w-full h-full object-cover rounded-[2rem] border border-gray-50 shadow-sm" loading="lazy">
+                            <div class="flex-none w-full h-64 snap-center">
+                                <img src="${img}" class="w-full h-full object-cover rounded-[1.8rem] border border-gray-50 shadow-sm" loading="lazy" onerror="this.src='https://placehold.co/600x400?text=Gambar+Masih+Diproses'">
                             </div>
                         `).join('')}
                     </div>
-                    ${images.length > 1 ? `<div class="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/40 backdrop-blur-md text-white text-[8px] px-3 py-1.5 rounded-full font-black uppercase tracking-widest pointer-events-none border border-white/10 flex items-center gap-1.5">Geser <i data-lucide="chevron-right" class="w-2.5 h-2.5"></i></div>` : ''}
+                    ${images.length > 1 ? `<div class="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/40 backdrop-blur-md text-white text-[7px] px-2.5 py-1 rounded-full font-black uppercase tracking-widest pointer-events-none border border-white/10 flex items-center gap-1">Geser Foto <i data-lucide="arrow-right" class="w-2 h-2"></i></div>` : ''}
                 </div>
             `;
         }
@@ -285,61 +320,45 @@
         function ReportCard(report, index) {
             const rComments = comments.filter(c => c.reportId == report.id);
             const isExpanded = expandedReports.has(report.id);
-            const needsTruncation = report.description && report.description.length > 150;
+            const desc = report.description || "";
+            const isLong = desc.length > 140;
             
             return `
-                <div class="bg-white border border-gray-100 rounded-[2.5rem] p-5 mb-8 shadow-sm animate-slide-up overflow-hidden" style="animation-delay: ${index * 100}ms">
+                <div class="bg-white border border-gray-100 rounded-[2.2rem] p-5 mb-6 shadow-sm animate-slide-up" style="animation-delay: ${index * 80}ms">
                     <div class="flex justify-between items-start mb-4">
-                        <div class="flex items-center gap-3">
-                            <div class="w-8 h-8 rounded-full bg-emerald-50 flex items-center justify-center border border-emerald-100">
-                                <i data-lucide="calendar" class="w-4 h-4 text-emerald-600"></i>
-                            </div>
-                            <div>
-                                <p class="text-[8px] font-black text-emerald-600 uppercase tracking-widest mb-0.5">Kegiatan Rutin</p>
-                                <p class="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">${new Date(report.date).toLocaleDateString('id-ID', { dateStyle: 'long' })}</p>
-                            </div>
+                        <div>
+                            <p class="text-[8px] font-black text-emerald-600 uppercase tracking-widest mb-0.5">Laporan Baru</p>
+                            <p class="text-[9px] font-bold text-gray-400 uppercase tracking-tighter">${new Date(report.date).toLocaleDateString('id-ID', { dateStyle: 'long' })}</p>
                         </div>
                         ${isAdmin ? `<button onclick="window.handleDelete('${report.id}')" class="text-red-300 hover:text-red-500 p-2"><i data-lucide="trash" class="w-4 h-4"></i></button>` : ''}
                     </div>
-                    
                     ${ImageSlider(report.images)}
-
                     <div class="mb-4">
-                        <h3 class="text-[16px] font-black text-gray-900 mb-2 leading-tight">${report.tema}</h3>
-                        <div class="relative">
-                            <p id="desc-${report.id}" class="text-gray-600 text-[13px] leading-relaxed whitespace-pre-wrap font-medium transition-all ${!isExpanded && needsTruncation ? 'line-clamp-3' : ''}">
-                                ${report.description}
-                            </p>
-                            ${needsTruncation ? `
-                                <button onclick="window.toggleDescription('${report.id}')" class="text-emerald-600 text-[11px] font-black uppercase tracking-wider mt-2 flex items-center gap-1 hover:text-emerald-700">
-                                    ${isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}
-                                    <i data-lucide="${isExpanded ? 'chevron-up' : 'chevron-down'}" class="w-3 h-3"></i>
-                                </button>
-                            ` : ''}
+                        <h3 class="text-base font-black text-gray-900 mb-1.5 leading-tight">${report.tema}</h3>
+                        <div class="text-gray-600 text-[12px] leading-relaxed whitespace-pre-wrap font-medium">
+                            ${isLong && !isExpanded ? desc.substring(0, 140) + '...' : desc}
+                            ${isLong ? `<button onclick="window.toggleDescription('${report.id}')" class="text-emerald-600 font-black ml-1 uppercase text-[10px] tracking-tight">${isExpanded ? 'Sembunyikan' : 'Baca Selengkapnya'}</button>` : ''}
                         </div>
                     </div>
-
                     <div class="flex items-center justify-between border-t border-gray-50 pt-4 mb-4">
-                        <button onclick="window.handleLike('${report.id}')" class="flex items-center gap-2 px-4 py-2 rounded-xl bg-gray-50 text-gray-500 active:scale-90 transition-all">
-                            <i data-lucide="heart" class="w-4 h-4 ${report.likes > 0 ? 'fill-red-500 text-red-500' : ''}"></i>
-                            <span class="text-xs font-black">${report.likes || 0}</span>
+                        <button onclick="window.handleLike('${report.id}')" class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-gray-50 text-gray-500 active:scale-90 transition-all">
+                            <i data-lucide="heart" class="w-3.5 h-3.5 ${report.likes > 0 ? 'fill-red-500 text-red-500' : ''}"></i>
+                            <span class="text-[10px] font-black">${report.likes || 0}</span>
                         </button>
-                        <span class="text-[9px] font-black text-gray-300 uppercase tracking-widest">${rComments.length} Komentar</span>
+                        <span class="text-[8px] font-black text-gray-300 uppercase tracking-widest">${rComments.length} Komentar</span>
                     </div>
-
-                    <div class="space-y-2 mb-4">
+                    <div class="space-y-1.5 mb-4">
                         ${rComments.slice(-2).map(c => `
-                            <div class="bg-gray-50/70 p-3 rounded-2xl text-[12px]">
-                                <b class="text-emerald-600 block text-[9px] font-black uppercase mb-0.5">${c.name}</b>
+                            <div class="bg-gray-50/70 p-2.5 rounded-xl text-[11px]">
+                                <b class="text-emerald-600 block text-[8px] font-black uppercase mb-0.5">${c.name}</b>
                                 <span class="text-gray-600 font-medium">${c.text}</span>
                             </div>
                         `).join('')}
                     </div>
-
-                    <div class="bg-gray-100 rounded-2xl p-2.5 flex gap-2 border border-transparent focus-within:border-emerald-200 focus-within:bg-white transition-all">
-                        ${!myName ? `<input type="text" id="name-input-${report.id}" placeholder="Nama" class="w-16 bg-transparent border-none text-[11px] font-black focus:ring-0 px-2">` : ''}
-                        <input type="text" id="comment-input-${report.id}" placeholder="Tulis tanggapan..." class="flex-1 bg-transparent border-none text-[11px] font-medium focus:ring-0">
-                        <button onclick="window.handleComment('${report.id}')" class="bg-gray-900 text-white w-8 h-8 rounded-lg flex items-center justify-center shrink-0"><i data-lucide="send" class="w-3.5 h-3.5"></i></button>
+                    <div class="bg-gray-100 rounded-xl p-2.5 flex gap-2 border border-transparent focus-within:border-emerald-200 focus-within:bg-white transition-all">
+                        ${!myName ? `<input type="text" id="name-input-${report.id}" placeholder="Nama" class="w-16 bg-transparent border-none text-[11px] font-black focus:ring-0 px-0">` : ''}
+                        <input type="text" id="comment-input-${report.id}" placeholder="Tanggapan..." class="flex-1 bg-transparent border-none text-[11px] font-medium focus:ring-0 px-0">
+                        <button onclick="window.handleComment('${report.id}')" class="bg-gray-900 text-white w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"><i data-lucide="send" class="w-3 h-3"></i></button>
                     </div>
                 </div>
             `;
@@ -351,73 +370,63 @@
             let html = Navbar();
 
             if (isLoadingData) {
-                html += `<div class="py-20 text-center flex flex-col items-center"><div class="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4"></div><p class="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Memuat Cerita Al Ihsan...</p></div>`;
+                html += `<div class="py-20 text-center flex flex-col items-center"><div class="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4"></div><p class="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Sinkronisasi Cloud...</p></div>`;
             } else if (activeTab === 'home') {
                 const filtered = reports.filter(r => (r.tema + r.description).toLowerCase().includes(searchTerm));
                 html += `
-                    <div class="max-w-xl mx-auto px-5 py-6">
-                        <div class="text-center mb-10">
-                            <h2 class="text-2xl font-black mb-6 tracking-tight shimmer-effect leading-tight">Mewujudkan Senyum<br>Anak Bangsa</h2>
-                            <div class="relative group">
-                                <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300 w-4 h-4 transition-colors group-focus-within:text-emerald-500"></i>
-                                <input type="text" oninput="window.handleSearch(event)" placeholder="Cari kegiatan..." class="w-full bg-white border border-gray-100 rounded-2xl py-3.5 pl-12 pr-4 text-xs shadow-sm outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all">
+                    <div class="max-w-xl mx-auto px-4 py-6">
+                        <div class="text-center mb-8">
+                            <h2 class="text-2xl font-black mb-4 tracking-tight shimmer-effect leading-tight uppercase tracking-tighter">Mewujudkan Senyum<br>Anak Bangsa</h2>
+                            <div class="relative max-w-sm mx-auto">
+                                <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300 w-4 h-4"></i>
+                                <input type="text" oninput="window.handleSearch(event)" placeholder="Cari laporan..." class="w-full bg-white border border-gray-100 rounded-2xl py-3 pl-11 pr-4 text-xs shadow-sm outline-none focus:ring-2 focus:ring-emerald-500">
                             </div>
                         </div>
-                        <div class="feed">${filtered.length ? filtered.map((r, i) => ReportCard(r, i)).join('') : '<div class="text-center py-20 opacity-30"><i data-lucide="info" class="w-12 h-12 mx-auto mb-4"></i><p class="text-[10px] font-black uppercase tracking-widest">Laporan Tidak Ditemukan</p></div>'}</div>
+                        <div class="feed">${filtered.length ? filtered.map((r, i) => ReportCard(r, i)).join('') : '<p class="text-center text-gray-400 text-xs py-10 font-black uppercase tracking-widest animate-pulse">Laporan Tidak Ditemukan</p>'}</div>
                     </div>
                 `;
             } else if (activeTab === 'admin') {
                 if (!isAdmin) {
                     html += `
-                        <div class="max-w-xs mx-auto py-24 px-5">
-                            <div class="bg-white p-8 rounded-[3rem] shadow-xl text-center border border-gray-50">
-                                <div class="w-16 h-16 bg-emerald-50 rounded-2xl flex items-center justify-center mx-auto mb-6">
-                                    <i data-lucide="lock" class="w-8 h-8 text-emerald-600"></i>
-                                </div>
-                                <h2 class="font-black text-lg mb-2 tracking-tight uppercase tracking-widest">Akses Pengurus</h2>
-                                <p class="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-6">Masukkan kode akses</p>
-                                <input type="password" id="admin-pass" placeholder="••••••••" class="w-full bg-gray-50 rounded-xl p-4 text-center text-xl font-black mb-4 outline-none focus:ring-2 focus:ring-emerald-500 tracking-[0.3em]">
-                                <button onclick="window.checkAdmin()" class="w-full bg-emerald-600 text-white font-black py-4 rounded-xl shadow-lg text-[10px] tracking-widest uppercase">Masuk Sekarang</button>
+                        <div class="max-w-xs mx-auto py-20 px-5">
+                            <div class="bg-white p-8 rounded-[2.5rem] shadow-xl text-center border border-gray-100">
+                                <h2 class="font-black text-lg mb-6 tracking-tight uppercase tracking-widest text-gray-800">Panel Pengurus</h2>
+                                <input type="password" id="admin-pass" placeholder="KODE AKSES" class="w-full bg-gray-50 rounded-xl p-4 text-center text-lg font-black mb-4 outline-none focus:ring-2 focus:ring-emerald-500 tracking-[0.2em]">
+                                <button onclick="window.checkAdmin()" class="w-full bg-emerald-600 text-white font-black py-4 rounded-xl shadow-lg text-[10px] tracking-widest uppercase">Verifikasi</button>
                             </div>
                         </div>
                     `;
                 } else {
                     html += `
-                        <div class="max-w-xl mx-auto px-5 py-8">
-                            <div class="flex justify-between items-center mb-8">
-                                <div>
-                                    <h2 class="text-2xl font-black tracking-tight uppercase">Tulis Laporan</h2>
-                                    <p class="text-[9px] font-bold text-gray-400 uppercase tracking-widest mt-1">Dokumentasikan kebaikan hari ini</p>
-                                </div>
-                                <button onclick="window.logoutAdmin()" class="text-red-500 text-[10px] font-black uppercase tracking-widest px-3 py-2 bg-red-50 rounded-xl hover:bg-red-100 transition-colors">Keluar</button>
+                        <div class="max-w-xl mx-auto px-4 py-6">
+                            <div class="flex justify-between items-center mb-6">
+                                <h2 class="text-xl font-black tracking-tight uppercase text-gray-800">Upload Laporan</h2>
+                                <button onclick="window.logoutAdmin()" class="text-red-500 text-[8px] font-black uppercase tracking-widest px-2.5 py-1 bg-red-50 rounded-lg">Keluar</button>
                             </div>
-                            <form onsubmit="window.handleUpload(event)" class="bg-white p-6 rounded-[2.5rem] shadow-xl space-y-6">
-                                <div class="bg-emerald-50/20 p-8 rounded-[2rem] border-2 border-dashed border-emerald-100 text-center relative hover:bg-emerald-50/40 transition-colors">
+                            <form onsubmit="window.handleUpload(event)" class="bg-white p-6 rounded-[2.2rem] shadow-xl space-y-5 border border-gray-100">
+                                <div class="bg-emerald-50/30 p-6 rounded-[1.8rem] border-2 border-dashed border-emerald-100 text-center relative transition-colors hover:bg-emerald-50/50">
                                     <input type="file" id="files" multiple accept="image/*" class="hidden" onchange="window.handleFileChange(event)">
                                     <label for="files" class="cursor-pointer block">
-                                        <div class="w-12 h-12 bg-white text-emerald-600 rounded-xl flex items-center justify-center mx-auto mb-3 shadow-sm border border-emerald-50"><i data-lucide="camera" class="w-6 h-6"></i></div>
-                                        <p class="text-[11px] font-black text-emerald-800 uppercase tracking-widest">${currentSelectedFiles.length ? currentSelectedFiles.length + ' Foto Terpilih' : 'Upload Dokumentasi'}</p>
-                                        <p class="text-[8px] text-emerald-600/50 mt-1 uppercase font-bold tracking-tighter">Maksimal 5 Foto</p>
+                                        <div class="w-10 h-10 bg-white text-emerald-600 rounded-xl flex items-center justify-center mx-auto mb-2 shadow-sm"><i data-lucide="image-plus" class="w-5 h-5"></i></div>
+                                        <p class="text-[10px] font-black text-emerald-800 uppercase tracking-widest">${currentSelectedFiles.length ? currentSelectedFiles.length + ' Foto Terpilih' : 'Pilih Foto Kegiatan'}</p>
                                     </label>
                                 </div>
-                                ${selectedFilePreviews.length ? `<div class="grid grid-cols-5 gap-2 px-2">${selectedFilePreviews.map(p => `<div class="aspect-square rounded-lg overflow-hidden border border-gray-100 shadow-sm"><img src="${p}" class="w-full h-full object-cover"></div>`).join('')}</div>` : ''}
-                                <div class="space-y-4">
-                                    <div class="bg-gray-50 rounded-xl p-3">
-                                        <label class="block text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1 ml-1">Tanggal Kegiatan</label>
-                                        <input type="date" name="date" required class="w-full bg-transparent border-none font-bold text-xs outline-none focus:ring-0">
+                                ${selectedFilePreviews.length ? `<div class="grid grid-cols-5 gap-2">${selectedFilePreviews.map(p => `<div class="aspect-square rounded-lg overflow-hidden border-2 border-white shadow-sm"><img src="${p}" class="w-full h-full object-cover"></div>`).join('')}</div>` : ''}
+                                <div class="space-y-3">
+                                    <div class="space-y-1">
+                                        <label class="text-[8px] font-black uppercase tracking-widest text-gray-400 ml-2">Tanggal Kegiatan</label>
+                                        <input type="date" name="date" required class="w-full bg-gray-50 p-3.5 rounded-xl border-none font-bold text-xs outline-none focus:ring-2 focus:ring-emerald-500">
                                     </div>
-                                    <div class="bg-gray-50 rounded-xl p-3">
-                                        <label class="block text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1 ml-1">Nama Kegiatan</label>
-                                        <input type="text" name="tema" placeholder="Contoh: Belajar Tajwid Bareng" required class="w-full bg-transparent border-none font-bold text-xs outline-none focus:ring-0">
+                                    <div class="space-y-1">
+                                        <label class="text-[8px] font-black uppercase tracking-widest text-gray-400 ml-2">Tema/Judul</label>
+                                        <input type="text" name="tema" placeholder="Nama kegiatan hari ini" required class="w-full bg-gray-50 p-3.5 rounded-xl border-none font-bold text-xs outline-none focus:ring-2 focus:ring-emerald-500">
                                     </div>
-                                    <div class="bg-gray-50 rounded-xl p-3">
-                                        <label class="block text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1 ml-1">Deskripsi Lengkap</label>
-                                        <textarea name="description" placeholder="Apa saja yang dilakukan anak-anak hari ini?" required rows="5" class="w-full bg-transparent border-none text-xs font-medium outline-none focus:ring-0"></textarea>
+                                    <div class="space-y-1">
+                                        <label class="text-[8px] font-black uppercase tracking-widest text-gray-400 ml-2">Deskripsi</label>
+                                        <textarea name="description" placeholder="Ceritakan detail kegiatannya..." required rows="4" class="w-full bg-gray-50 p-3.5 rounded-xl border-none text-xs font-medium outline-none focus:ring-2 focus:ring-emerald-500"></textarea>
                                     </div>
                                 </div>
-                                <button type="submit" id="btn-upload" class="w-full bg-emerald-600 text-white font-black py-5 rounded-2xl shadow-xl hover:bg-emerald-700 transition-all uppercase tracking-widest text-[11px] flex items-center justify-center gap-2">
-                                    Terbitkan Laporan <i data-lucide="plus-circle" class="w-4 h-4"></i>
-                                </button>
+                                <button type="submit" id="btn-upload" class="w-full bg-emerald-600 text-white font-black py-4 rounded-xl shadow-xl hover:bg-emerald-700 active:scale-[0.98] transition-all uppercase tracking-widest text-[10px]">Terbitkan Laporan</button>
                             </form>
                         </div>
                     `;
@@ -427,7 +436,6 @@
             lucide.createIcons();
         };
 
-        // --- Init ---
         fetchData();
     </script>
 </body>
