@@ -38,14 +38,13 @@
     </style>
 </head>
 <body class="pb-24">
-    <!-- Loading Screen -->
     <div id="loading" class="fixed inset-0 flex items-center justify-center bg-white z-[200]">
         <div class="flex flex-col items-center">
             <div class="relative w-20 h-20 flex items-center justify-center">
                 <div class="absolute inset-0 border-4 border-emerald-50 rounded-full"></div>
                 <div class="absolute inset-0 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
                 <div class="w-10 h-10 overflow-hidden rounded-xl">
-                    <img src="https://img.sanishtech.com/u/b4b2625dd6eb1438fbc393468d2ee7bf.png" class="w-full h-full object-contain" onerror="this.src='https://images.unsplash.com/photo-1546410531-bb4caa6b424d?w=100&h=100&fit=crop'">
+                    <img src="https://img.sanishtech.com/u/b4b2625dd6eb1438fbc393468d2ee7bf.png" class="w-full h-full object-contain">
                 </div>
             </div>
             <div class="mt-6 text-center">
@@ -58,27 +57,16 @@
     <div id="app"></div>
 
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, addDoc, onSnapshot, deleteDoc, updateDoc, increment } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
 
-        // Global Setup
+        // --- Configuration (GANTI DENGAN MILIK ANDA) ---
+        const SUPABASE_URL = 'https://YOUR_PROJECT_ID.supabase.co'
+        const SUPABASE_KEY = 'YOUR_ANON_KEY'
+        const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
+
         const LOGO_URL = "https://img.sanishtech.com/u/b4b2625dd6eb1438fbc393468d2ee7bf.png";
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { 
-            apiKey: "AIzaSyDMvljAuezBNT0XqEYqHGyeiLFsLj2nc-g", 
-            authDomain: "rumah-belajar-9d96f.firebaseapp.com", 
-            projectId: "rumah-belajar-9d96f", 
-            storageBucket: "rumah-belajar-9d96f.firebasestorage.app", 
-            messagingSenderId: "986983944919", 
-            appId: "1:986983944919:web:f9d44b3d59c8bd6348d692"
-        };
 
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'rumah-belajar-al-ihsan';
-
-        // State
+        // --- State ---
         let isAdmin = false;
         let activeTab = 'home';
         let reports = [];
@@ -87,32 +75,57 @@
         let selectedFilePreviews = [];
         let currentSelectedFiles = [];
         let myName = localStorage.getItem('al_ihsan_user_name') || "";
-        let currentUser = null;
         let isLoadingData = true;
 
-        // --- Auth & Data Logic ---
+        // --- Data Logic (Supabase) ---
 
-        const initAuth = async () => {
+        const fetchData = async () => {
             try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
-            } catch (error) {
-                console.error("Auth Failure:", error);
+                const { data: initialReports, error: rError } = await supabase
+                    .from('reports')
+                    .select('*')
+                    .order('createdAt', { ascending: false });
+                
+                const { data: initialComments, error: cError } = await supabase
+                    .from('comments')
+                    .select('*');
+
+                if (rError || cError) throw (rError || cError);
+
+                reports = initialReports || [];
+                comments = initialComments || [];
+                isLoadingData = false;
+                renderApp();
+                hideLoader();
+            } catch (err) {
+                console.error("Fetch Error:", err);
                 hideLoader();
             }
         };
 
-        onAuthStateChanged(auth, (user) => {
-            currentUser = user;
-            if (user) {
-                setupListeners();
-            } else {
-                renderApp();
-            }
-        });
+        const setupRealtime = () => {
+            // Monitor Tabel Reports
+            supabase.channel('public:reports')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, payload => {
+                    if (payload.eventType === 'INSERT') {
+                        reports = [payload.new, ...reports];
+                    } else if (payload.eventType === 'UPDATE') {
+                        reports = reports.map(r => r.id === payload.new.id ? payload.new : r);
+                    } else if (payload.eventType === 'DELETE') {
+                        reports = reports.filter(r => r.id !== payload.old.id);
+                    }
+                    renderApp();
+                })
+                .subscribe();
+
+            // Monitor Tabel Comments
+            supabase.channel('public:comments')
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'comments' }, payload => {
+                    comments = [...comments, payload.new];
+                    renderApp();
+                })
+                .subscribe();
+        };
 
         const hideLoader = () => {
             const loader = document.getElementById('loading');
@@ -122,36 +135,12 @@
             }
         };
 
-        const setupListeners = () => {
-            if (!currentUser) return;
-
-            const reportsRef = collection(db, 'artifacts', appId, 'public', 'data', 'reports');
-            const commentsRef = collection(db, 'artifacts', appId, 'public', 'data', 'comments');
-
-            onSnapshot(reportsRef, (snapshot) => {
-                reports = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-                    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                isLoadingData = false;
-                renderApp();
-                hideLoader();
-            }, (err) => {
-                console.error("Report Sync Error:", err);
-                isLoadingData = false;
-                renderApp();
-            });
-
-            onSnapshot(commentsRef, (snapshot) => {
-                comments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                renderApp();
-            });
-        };
-
-        // --- Form Handlers ---
+        // --- Handlers ---
 
         window.handleFileChange = (e) => {
             const files = Array.from(e.target.files);
             if (files.length > 5) {
-                showToast('Maksimal 5 foto per laporan!');
+                showToast('Maksimal 5 foto!');
                 e.target.value = "";
                 return;
             }
@@ -162,7 +151,7 @@
         };
 
         const compressImage = (file) => {
-            return new Promise((resolve, reject) => {
+            return new Promise((resolve) => {
                 const reader = new FileReader();
                 reader.readAsDataURL(file);
                 reader.onload = (e) => {
@@ -170,76 +159,86 @@
                     img.src = e.target.result;
                     img.onload = () => {
                         const canvas = document.createElement('canvas');
-                        const MAX_W = 640; // Reduced for maximum safety
-                        let w = img.width;
-                        let h = img.height;
+                        const MAX_W = 640;
+                        let w = img.width, h = img.height;
                         if (w > MAX_W) { h *= MAX_W / w; w = MAX_W; }
-                        canvas.width = w;
-                        canvas.height = h;
+                        canvas.width = w; canvas.height = h;
                         const ctx = canvas.getContext('2d');
                         ctx.drawImage(img, 0, 0, w, h);
-                        resolve(canvas.toDataURL('image/jpeg', 0.4)); // Balanced quality
+                        resolve(canvas.toDataURL('image/jpeg', 0.5));
                     };
-                    img.onerror = reject;
                 };
-                reader.onerror = reject;
             });
         };
 
         window.handleUpload = async (e) => {
             e.preventDefault();
-            if (!currentUser) { showToast('Koneksi belum siap...'); return; }
-            
             const btn = document.getElementById('btn-upload');
             if (currentSelectedFiles.length === 0) { showToast('Pilih foto dulu!'); return; }
 
             btn.disabled = true;
-            btn.innerHTML = `<div class="flex items-center justify-center gap-2"><div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>Mengompres...</div>`;
+            btn.innerHTML = `Mengompres & Mengunggah...`;
 
             try {
                 const imageUrls = [];
-                for (let i = 0; i < currentSelectedFiles.length; i++) {
-                    btn.innerHTML = `<div class="flex items-center justify-center gap-2"><div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>Foto ${i+1}/${currentSelectedFiles.length}...</div>`;
-                    const base64 = await compressImage(currentSelectedFiles[i]);
+                for (const file of currentSelectedFiles) {
+                    const base64 = await compressImage(file);
                     imageUrls.push(base64);
                 }
 
                 const formData = new FormData(e.target);
-                const payload = {
+                const { error } = await supabase.from('reports').insert([{
                     date: formData.get('date'),
                     tema: formData.get('tema'),
                     description: formData.get('description'),
                     images: imageUrls,
                     likes: 0,
-                    createdAt: new Date().toISOString(),
-                    userId: currentUser.uid
-                };
+                    createdAt: new Date().toISOString()
+                }]);
 
-                // Check payload size estimate
-                const sizeEstimate = JSON.stringify(payload).length;
-                if (sizeEstimate > 800000) {
-                    showToast('Data terlalu besar. Kurangi jumlah foto.');
-                    btn.disabled = false;
-                    btn.innerText = 'Terbitkan Laporan';
-                    return;
-                }
-
-                btn.innerHTML = `<div class="flex items-center justify-center gap-2"><div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>Sinkronisasi Cloud...</div>`;
-                
-                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'reports'), payload);
-                
-                showToast('Laporan berhasil diterbitkan!');
+                if (error) throw error;
+                showToast('Laporan diterbitkan!');
                 window.setTab('home');
             } catch (err) {
-                console.error("Firestore Upload Error:", err);
-                showToast('Gagal terbit. Coba kurangi foto atau cek sinyal.');
+                showToast('Gagal terbit!');
+                console.error(err);
             } finally {
                 btn.disabled = false;
                 btn.innerText = 'Terbitkan Laporan';
             }
         };
 
-        // --- Interaction Handlers ---
+        window.handleLike = async (id) => {
+            const report = reports.find(r => r.id === id);
+            const { error } = await supabase
+                .from('reports')
+                .update({ likes: (report.likes || 0) + 1 })
+                .eq('id', id);
+            if (error) console.error(error);
+        };
+
+        window.handleComment = async (id) => {
+            const nameInput = document.getElementById(`name-input-${id}`);
+            const commentInput = document.getElementById(`comment-input-${id}`);
+            const name = nameInput ? nameInput.value.trim() : myName;
+            const text = commentInput.value.trim();
+
+            if (!name || !text) return;
+            if (!myName) { myName = name; localStorage.setItem('al_ihsan_user_name', name); }
+
+            const { error } = await supabase.from('comments').insert([{
+                reportId: id, name, text, createdAt: new Date().toISOString()
+            }]);
+            
+            if (!error) commentInput.value = '';
+        };
+
+        window.handleDelete = async (id) => {
+            if (confirm("Hapus laporan ini?")) {
+                await supabase.from('reports').delete().eq('id', id);
+                showToast('Laporan dihapus');
+            }
+        };
 
         window.setTab = (tab) => {
             activeTab = tab;
@@ -251,50 +250,12 @@
         };
 
         window.handleSearch = (e) => { searchTerm = e.target.value.toLowerCase(); renderApp(); };
-
         window.checkAdmin = () => {
             const pass = document.getElementById('admin-pass').value;
             if (pass.toLowerCase() === 'gusdurian') { isAdmin = true; renderApp(); }
-            else { showToast('Kode akses salah!'); }
+            else { showToast('Kode salah!'); }
         };
-
         window.logoutAdmin = () => { isAdmin = false; activeTab = 'home'; renderApp(); };
-
-        window.handleLike = async (id) => {
-            if (!currentUser) return;
-            try {
-                const ref = doc(db, 'artifacts', appId, 'public', 'data', 'reports', id);
-                await updateDoc(ref, { likes: increment(1) });
-            } catch (e) { console.error(e); }
-        };
-
-        window.handleComment = async (id) => {
-            if (!currentUser) return;
-            const nameInput = document.getElementById(`name-input-${id}`);
-            const commentInput = document.getElementById(`comment-input-${id}`);
-            const name = nameInput ? nameInput.value.trim() : myName;
-            const text = commentInput.value.trim();
-
-            if (!name || !text) return;
-            if (!myName) { myName = name; localStorage.setItem('al_ihsan_user_name', name); }
-
-            try {
-                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'comments'), {
-                    reportId: id, name, text, createdAt: new Date().toISOString(), userId: currentUser.uid
-                });
-                commentInput.value = '';
-                if (nameInput) nameInput.style.display = 'none';
-            } catch (e) { console.error(e); }
-        };
-
-        window.handleDelete = async (id) => {
-            if (confirm("Hapus laporan ini secara permanen?")) {
-                try {
-                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reports', id));
-                    showToast('Laporan dihapus');
-                } catch(e) { showToast('Gagal menghapus'); }
-            }
-        };
 
         function showToast(msg) {
             const existing = document.querySelector('.toast-notif');
@@ -313,7 +274,7 @@
                 <nav class="bg-white/80 backdrop-blur-xl border-b border-gray-100 sticky top-0 z-50">
                     <div class="max-w-4xl mx-auto px-6 h-20 flex items-center justify-between">
                         <div class="flex items-center gap-3 cursor-pointer" onclick="window.setTab('home')">
-                            <img src="${LOGO_URL}" class="w-9 h-9 object-contain" onerror="this.src='https://images.unsplash.com/photo-1546410531-bb4caa6b424d?w=100&h=100&fit=crop'">
+                            <img src="${LOGO_URL}" class="w-9 h-9 object-contain">
                             <div class="flex flex-col">
                                 <h1 class="font-black text-gray-900 leading-none text-base tracking-tight shimmer-effect uppercase">AL IHSAN</h1>
                                 <p class="text-[7px] text-emerald-600 font-black uppercase tracking-widest mt-1 leading-none">Gusdurian</p>
@@ -345,7 +306,7 @@
         }
 
         function ReportCard(report, index) {
-            const rComments = comments.filter(c => c.reportId === report.id);
+            const rComments = comments.filter(c => c.reportId == report.id);
             return `
                 <div class="bg-white border border-gray-100 rounded-[2.5rem] p-6 mb-8 shadow-sm animate-slide-up" style="animation-delay: ${index * 100}ms">
                     <div class="flex justify-between items-start mb-5">
@@ -394,29 +355,24 @@
                 html += `
                     <div class="max-w-xl mx-auto px-5 py-8">
                         <div class="text-center mb-10">
-                            <div class="inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 text-[9px] font-black uppercase px-4 py-1.5 rounded-full tracking-widest mb-4">
-                                <span class="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span> Update Feed
-                            </div>
                             <h2 class="text-3xl font-black mb-6 tracking-tight shimmer-effect leading-tight">Mewujudkan Senyum<br>Anak Bangsa</h2>
                             <div class="relative">
                                 <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300 w-4 h-4"></i>
                                 <input type="text" oninput="window.handleSearch(event)" placeholder="Cari laporan..." class="w-full bg-white border border-gray-100 rounded-2xl py-3.5 pl-12 pr-4 text-xs shadow-sm outline-none focus:ring-2 focus:ring-emerald-500">
                             </div>
                         </div>
-                        ${isLoadingData ? `<div class="py-20 text-center"><div class="w-8 h-8 border-4 border-emerald-100 border-t-emerald-500 rounded-full animate-spin mx-auto mb-4"></div><p class="text-[10px] text-gray-400 font-bold tracking-widest uppercase">Sinkronisasi Cloud...</p></div>` : ''}
+                        ${isLoadingData ? `<div class="py-20 text-center"><div class="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto"></div></div>` : ''}
                         <div class="feed">${filtered.map((r, i) => ReportCard(r, i)).join('')}</div>
-                        ${!isLoadingData && filtered.length === 0 ? `<div class="text-center py-20 bg-white rounded-[2rem] border border-gray-100"><i data-lucide="file-x" class="w-10 h-10 text-gray-200 mx-auto mb-3"></i><p class="text-gray-400 font-bold text-[10px] uppercase">Belum ada data</p></div>` : ''}
                     </div>
                 `;
-            } else {
+            } else if (activeTab === 'admin') {
                 if (!isAdmin) {
                     html += `
                         <div class="max-w-xs mx-auto py-24 px-5">
-                            <div class="bg-white p-8 rounded-[3rem] shadow-xl border border-gray-100 text-center">
-                                <div class="w-14 h-14 bg-gray-900 text-white rounded-2xl flex items-center justify-center mx-auto mb-6"><i data-lucide="lock" class="w-7 h-7"></i></div>
-                                <h2 class="font-black text-xl mb-6 tracking-tight uppercase">Panel Pengurus</h2>
-                                <input type="password" id="admin-pass" placeholder="KODE AKSES" class="w-full bg-gray-50 rounded-xl p-4 text-center text-xl font-black mb-4 outline-none focus:ring-2 focus:ring-emerald-500 tracking-[0.2em]">
-                                <button onclick="window.checkAdmin()" class="w-full bg-emerald-600 text-white font-black py-4 rounded-xl shadow-lg text-xs tracking-widest">VERIFIKASI</button>
+                            <div class="bg-white p-8 rounded-[3rem] shadow-xl text-center border border-gray-100">
+                                <h2 class="font-black text-xl mb-6 tracking-tight uppercase tracking-widest">Akses Pengurus</h2>
+                                <input type="password" id="admin-pass" placeholder="KODE AKSES" class="w-full bg-gray-50 rounded-xl p-4 text-center text-xl font-black mb-4 outline-none focus:ring-2 focus:ring-emerald-500">
+                                <button onclick="window.checkAdmin()" class="w-full bg-emerald-600 text-white font-black py-4 rounded-xl shadow-lg text-xs tracking-widest uppercase">Verifikasi</button>
                             </div>
                         </div>
                     `;
@@ -427,20 +383,19 @@
                                 <h2 class="text-2xl font-black tracking-tight uppercase">Upload Laporan</h2>
                                 <button onclick="window.logoutAdmin()" class="text-red-500 text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-red-50 rounded-lg">Keluar</button>
                             </div>
-                            <form onsubmit="window.handleUpload(event)" class="bg-white p-8 rounded-[2.5rem] shadow-xl space-y-6 border border-gray-50">
+                            <form onsubmit="window.handleUpload(event)" class="bg-white p-8 rounded-[2.5rem] shadow-xl space-y-6">
                                 <div class="bg-emerald-50/30 p-8 rounded-[2rem] border-2 border-dashed border-emerald-100 text-center relative">
                                     <input type="file" id="files" multiple accept="image/*" class="hidden" onchange="window.handleFileChange(event)">
                                     <label for="files" class="cursor-pointer block">
                                         <div class="w-12 h-12 bg-white text-emerald-600 rounded-xl flex items-center justify-center mx-auto mb-3 shadow-sm"><i data-lucide="image-plus" class="w-6 h-6"></i></div>
                                         <p class="text-[11px] font-black text-emerald-800 uppercase tracking-widest">${currentSelectedFiles.length ? currentSelectedFiles.length + ' Foto Terpilih' : 'Pilih Foto Kegiatan'}</p>
-                                        <p class="text-[8px] text-gray-400 mt-1 uppercase font-bold">Max 5 Foto - Kualitas HD</p>
                                     </label>
                                 </div>
                                 ${selectedFilePreviews.length ? `<div class="grid grid-cols-5 gap-2">${selectedFilePreviews.map(p => `<div class="aspect-square rounded-lg overflow-hidden border-2 border-white shadow-sm"><img src="${p}" class="w-full h-full object-cover"></div>`).join('')}</div>` : ''}
                                 <div class="space-y-4">
                                     <input type="date" name="date" required class="w-full bg-gray-50 p-4 rounded-xl border-none font-bold text-xs outline-none focus:ring-2 focus:ring-emerald-500">
                                     <input type="text" name="tema" placeholder="Tema/Judul Kegiatan" required class="w-full bg-gray-50 p-4 rounded-xl border-none font-bold text-xs outline-none focus:ring-2 focus:ring-emerald-500">
-                                    <textarea name="description" placeholder="Ceritakan keseruan kegiatannya..." required rows="5" class="w-full bg-gray-50 p-4 rounded-xl border-none text-xs font-medium outline-none focus:ring-2 focus:ring-emerald-500"></textarea>
+                                    <textarea name="description" placeholder="Ceritakan kegiatannya..." required rows="5" class="w-full bg-gray-50 p-4 rounded-xl border-none text-xs font-medium outline-none focus:ring-2 focus:ring-emerald-500"></textarea>
                                 </div>
                                 <button type="submit" id="btn-upload" class="w-full bg-emerald-600 text-white font-black py-5 rounded-2xl shadow-xl hover:bg-emerald-700 transition-all uppercase tracking-widest text-[11px]">Terbitkan Laporan</button>
                             </form>
@@ -452,8 +407,9 @@
             lucide.createIcons();
         };
 
-        initAuth();
+        // --- Init ---
+        fetchData();
+        setupRealtime();
     </script>
 </body>
 </html>
-
