@@ -6,7 +6,7 @@
     <title>Portal Laporan - Rumah Belajar Al Ihsan</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     
     <style>
         @keyframes slide-up { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
@@ -26,8 +26,15 @@
             100% { background-position: 100% center; }
         } 
 
-        body { background-color: #f8fafc; font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; overflow-x: hidden; }
-        .nav-btn { padding: 10px 20px; border-radius: 14px; color: #94a3b8; transition: all 0.3s; }
+        body { 
+            background-color: #f8fafc; 
+            font-family: 'Inter', system-ui, -apple-system, sans-serif; 
+            -webkit-tap-highlight-color: transparent; 
+            overflow-x: hidden;
+            color: #1e293b;
+        }
+
+        .nav-btn { padding: 10px 15px; border-radius: 14px; color: #94a3b8; transition: all 0.3s; display: flex; align-items: center; gap: 8px; }
         .nav-btn.active { background-color: white; color: #059669; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
         #loading { transition: opacity 0.5s ease; opacity: 1; display: flex; }
         
@@ -35,6 +42,31 @@
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         
         input, textarea { font-size: 16px !important; } 
+
+        /* Paragraf formatting - Justify & Typography */
+        .description-text {
+            line-height: 1.8;
+            letter-spacing: 0.01em;
+            white-space: pre-wrap;
+            word-break: break-word;
+            text-align: justify;
+            text-justify: inter-word;
+            color: #334155;
+            text-indent: 0 !important; /* Menghapus menjorok ke dalam */
+        }
+
+        .title-font {
+            letter-spacing: -0.025em;
+        }
+
+        .contact-card {
+            transition: all 0.3s ease;
+            border: 1px solid #f1f5f9;
+        }
+        .contact-card:active {
+            transform: scale(0.95);
+            background-color: #f0fdf4;
+        }
     </style>
 </head>
 <body class="pb-24">
@@ -68,8 +100,10 @@
 
         // --- Global State ---
         let isAdmin = false;
-        let activeTab = 'home'; // home, admin, detail
+        let activeTab = 'home'; // home, admin, detail, about
         let selectedPostId = null;
+        let isEditMode = false;
+        let editData = null;
         let reports = [];
         let comments = [];
         let searchTerm = "";
@@ -155,40 +189,61 @@
         window.handleUpload = async (e) => {
             e.preventDefault();
             const btn = document.getElementById('btn-upload');
-            if (currentSelectedFiles.length === 0) { showToast('Pilih foto dulu!'); return; }
+            const formData = new FormData(e.target);
+            
             btn.disabled = true;
-            btn.innerHTML = `<span class="flex items-center gap-2 justify-center"><div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Menyiapkan Data...</span>`;
+            btn.innerHTML = `<span class="flex items-center gap-2 justify-center"><div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Memproses...</span>`;
+            
             try {
-                const imageUrls = [];
-                for (let i = 0; i < currentSelectedFiles.length; i++) {
-                    const file = currentSelectedFiles[i];
-                    btn.innerHTML = `<span class="flex items-center gap-2 justify-center"><div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Mengirim Foto ${i+1}...</span>`;
-                    const finalBlob = await processImage(file);
-                    const fileName = `al_ihsan_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-                    const { error: uploadError } = await supabase.storage.from('images').upload(fileName, finalBlob, { contentType: 'image/jpeg' });
-                    if (uploadError) throw uploadError;
-                    const { data: urlData } = supabase.storage.from('images').getPublicUrl(fileName);
-                    if (urlData?.publicUrl) imageUrls.push(urlData.publicUrl);
+                let imageUrls = isEditMode ? [...editData.images] : [];
+
+                if (currentSelectedFiles.length > 0) {
+                    if (!isEditMode) imageUrls = []; 
+                    
+                    for (let i = 0; i < currentSelectedFiles.length; i++) {
+                        const file = currentSelectedFiles[i];
+                        btn.innerHTML = `<span class="flex items-center gap-2 justify-center"><div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Mengirim Foto ${i+1}...</span>`;
+                        const finalBlob = await processImage(file);
+                        const fileName = `al_ihsan_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+                        const { error: uploadError } = await supabase.storage.from('images').upload(fileName, finalBlob, { contentType: 'image/jpeg' });
+                        if (uploadError) throw uploadError;
+                        const { data: urlData } = supabase.storage.from('images').getPublicUrl(fileName);
+                        if (urlData?.publicUrl) imageUrls.push(urlData.publicUrl);
+                    }
                 }
-                const formData = new FormData(e.target);
-                const { error: dbError } = await supabase.from('reports').insert([{
-                    date: formData.get('date'),
-                    tema: formData.get('tema'),
-                    description: formData.get('description'),
-                    images: imageUrls,
-                    likes: 0,
-                    createdAt: new Date().toISOString()
-                }]);
-                if (dbError) throw dbError;
-                showToast('Laporan berhasil terbit!');
+
+                if (isEditMode) {
+                    const { error: dbError } = await supabase.from('reports').update({
+                        date: formData.get('date'),
+                        tema: formData.get('tema'),
+                        description: formData.get('description'),
+                        images: imageUrls
+                    }).eq('id', editData.id);
+                    if (dbError) throw dbError;
+                    showToast('Laporan diperbarui!');
+                } else {
+                    const { error: dbError } = await supabase.from('reports').insert([{
+                        date: formData.get('date'),
+                        tema: formData.get('tema'),
+                        description: formData.get('description'),
+                        images: imageUrls,
+                        likes: 0,
+                        createdAt: new Date().toISOString()
+                    }]);
+                    if (dbError) throw dbError;
+                    showToast('Laporan berhasil terbit!');
+                }
+
                 currentSelectedFiles = [];
                 selectedFilePreviews = [];
+                isEditMode = false;
+                editData = null;
                 e.target.reset();
                 setTimeout(() => { fetchData(); window.setTab('home'); }, 800);
             } catch (err) {
                 showToast(`Gagal: ${err.message}`);
                 btn.disabled = false;
-                btn.innerText = 'Terbitkan Laporan';
+                btn.innerText = isEditMode ? 'Simpan Perubahan' : 'Terbitkan Laporan';
             }
         };
 
@@ -197,6 +252,17 @@
             activeTab = 'detail';
             renderApp();
             window.scrollTo({top: 0, behavior: 'smooth'});
+        };
+
+        window.startEdit = (id) => {
+            const report = reports.find(r => r.id === id);
+            if (report) {
+                editData = report;
+                isEditMode = true;
+                activeTab = 'admin';
+                renderApp();
+                window.scrollTo({top: 0, behavior: 'smooth'});
+            }
         };
 
         window.handleLike = async (id) => {
@@ -227,6 +293,10 @@
 
         window.setTab = (tab) => {
             activeTab = tab;
+            if (tab !== 'admin') {
+                isEditMode = false;
+                editData = null;
+            }
             selectedPostId = null;
             selectedFilePreviews = [];
             currentSelectedFiles = [];
@@ -240,7 +310,7 @@
             if (pass.toLowerCase() === 'gusdurian') { isAdmin = true; renderApp(); }
             else { showToast('Kode salah!'); }
         };
-        window.logoutAdmin = () => { isAdmin = false; activeTab = 'home'; renderApp(); };
+        window.logoutAdmin = () => { isAdmin = false; activeTab = 'home'; isEditMode = false; editData = null; renderApp(); };
 
         function showToast(msg) {
             const existing = document.querySelector('.toast-notif');
@@ -258,14 +328,24 @@
                     <div class="max-w-4xl mx-auto px-6 h-20 flex items-center justify-between">
                         <div class="flex items-center gap-3 cursor-pointer" onclick="window.setTab('home')">
                             <img src="${LOGO_URL}" class="w-9 h-9 object-contain">
-                            <div class="flex flex-col">
-                                <h1 class="font-black text-gray-900 leading-none text-base tracking-tight shimmer-effect uppercase tracking-tighter">AL IHSAN</h1>
+                            <div class="flex flex-col hidden sm:block">
+                                <h1 class="font-black text-gray-900 leading-none text-base title-font shimmer-effect uppercase tracking-tighter">AL IHSAN</h1>
                                 <p class="text-[7px] text-emerald-600 font-black uppercase tracking-widest mt-1 leading-none">Rumah Belajar</p>
                             </div>
                         </div>
                         <div class="flex bg-gray-100 p-1.5 rounded-2xl gap-1">
-                            <button onclick="window.setTab('home')" class="nav-btn ${activeTab === 'home' ? 'active' : ''}"><i data-lucide="home" class="w-5 h-5"></i></button>
-                            <button onclick="window.setTab('admin')" class="nav-btn ${activeTab === 'admin' ? 'active' : ''}"><i data-lucide="plus-circle" class="w-5 h-5"></i></button>
+                            <button onclick="window.setTab('home')" class="nav-btn ${activeTab === 'home' ? 'active' : ''}">
+                                <i data-lucide="home" class="w-5 h-5"></i>
+                                <span class="text-[9px] font-black uppercase hidden md:block">Beranda</span>
+                            </button>
+                            <button onclick="window.setTab('about')" class="nav-btn ${activeTab === 'about' ? 'active' : ''}">
+                                <i data-lucide="info" class="w-5 h-5"></i>
+                                <span class="text-[9px] font-black uppercase hidden md:block">Tentang</span>
+                            </button>
+                            <button onclick="window.setTab('admin')" class="nav-btn ${activeTab === 'admin' ? 'active' : ''}">
+                                <i data-lucide="plus-circle" class="w-5 h-5"></i>
+                                <span class="text-[9px] font-black uppercase hidden md:block">Post</span>
+                            </button>
                         </div>
                     </div>
                 </nav>
@@ -279,7 +359,7 @@
                     <div class="flex overflow-x-auto snap-x snap-mandatory no-scrollbar gap-2 pb-1">
                         ${images.map(img => `
                             <div class="flex-none w-full ${isFull ? 'h-auto max-h-[500px]' : 'h-64'} snap-center">
-                                <img src="${img}" class="w-full h-full object-cover rounded-[1.8rem] border border-gray-50 shadow-sm" loading="lazy">
+                                <img src="${img}" class="w-full h-full object-cover rounded-[1.8rem] border border-gray-100 shadow-sm" loading="lazy">
                             </div>
                         `).join('')}
                     </div>
@@ -300,13 +380,18 @@
                             <p class="text-[8px] font-black text-emerald-600 uppercase tracking-widest mb-0.5">Laporan Baru</p>
                             <p class="text-[9px] font-bold text-gray-400 uppercase tracking-tighter">${new Date(report.date).toLocaleDateString('id-ID', { dateStyle: 'long' })}</p>
                         </div>
-                        ${isAdmin ? `<button onclick="window.handleDelete('${report.id}')" class="text-red-300 hover:text-red-500 p-2"><i data-lucide="trash" class="w-4 h-4"></i></button>` : ''}
+                        <div class="flex gap-1">
+                            ${isAdmin ? `
+                                <button onclick="window.startEdit('${report.id}')" class="text-emerald-400 hover:text-emerald-600 p-2"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
+                                <button onclick="window.handleDelete('${report.id}')" class="text-red-300 hover:text-red-500 p-2"><i data-lucide="trash" class="w-4 h-4"></i></button>
+                            ` : ''}
+                        </div>
                     </div>
                     <div onclick="window.viewPost('${report.id}')" class="cursor-pointer">
                         ${ImageSlider(report.images)}
                         <div class="mb-4">
-                            <h3 class="text-base font-black text-gray-900 mb-1.5 leading-tight">${report.tema}</h3>
-                            <div class="text-gray-600 text-[12px] leading-relaxed whitespace-pre-wrap font-medium">
+                            <h3 class="text-base font-black text-gray-900 mb-1.5 leading-tight title-font">${report.tema}</h3>
+                            <div class="description-text text-[13px]">
                                 ${isLong ? desc.substring(0, 120) + '...' : desc}
                                 ${isLong ? `<span class="text-emerald-600 font-black ml-1 uppercase text-[10px] tracking-tight">Baca Selengkapnya</span>` : ''}
                             </div>
@@ -334,17 +419,22 @@
                     
                     <div class="bg-white rounded-[2.5rem] border border-gray-100 overflow-hidden shadow-sm p-6 mb-6">
                         <div class="flex justify-between items-start mb-6">
-                            <div>
+                            <div class="pr-4 flex-1">
                                 <p class="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-1">Detail Kegiatan</p>
-                                <h1 class="text-2xl font-black text-gray-900 leading-tight">${report.tema}</h1>
+                                <h1 class="text-2xl font-black text-gray-900 leading-tight title-font">${report.tema}</h1>
                                 <p class="text-[10px] font-bold text-gray-400 uppercase mt-1 tracking-tight">${new Date(report.date).toLocaleDateString('id-ID', { dateStyle: 'full' })}</p>
                             </div>
-                            ${isAdmin ? `<button onclick="window.handleDelete('${report.id}')" class="text-red-500 p-2 bg-red-50 rounded-xl"><i data-lucide="trash" class="w-5 h-5"></i></button>` : ''}
+                            ${isAdmin ? `
+                                <div class="flex flex-col gap-2">
+                                    <button onclick="window.startEdit('${report.id}')" class="text-emerald-600 p-2 bg-emerald-50 rounded-xl"><i data-lucide="edit-3" class="w-5 h-5"></i></button>
+                                    <button onclick="window.handleDelete('${report.id}')" class="text-red-500 p-2 bg-red-50 rounded-xl"><i data-lucide="trash" class="w-5 h-5"></i></button>
+                                </div>
+                            ` : ''}
                         </div>
 
                         ${ImageSlider(report.images, true)}
 
-                        <div class="prose prose-sm max-w-none text-gray-700 text-[14px] leading-[1.8] font-medium whitespace-pre-wrap mb-8">
+                        <div class="description-text text-[15px] mb-8">
                             ${report.description}
                         </div>
 
@@ -357,8 +447,7 @@
                     </div>
 
                     <div class="bg-white rounded-[2.5rem] border border-gray-100 p-6 shadow-sm">
-                        <h3 class="text-sm font-black text-gray-900 mb-6 uppercase tracking-widest border-b border-gray-50 pb-4">${rComments.length} Tanggapan</h3>
-                        
+                        <h3 class="text-sm font-black text-gray-900 mb-6 uppercase tracking-widest border-b border-gray-100 pb-4">${rComments.length} Tanggapan</h3>
                         <div class="space-y-4 mb-8">
                             ${rComments.length ? rComments.map(c => `
                                 <div class="bg-gray-50 p-4 rounded-2xl">
@@ -384,6 +473,72 @@
             `;
         }
 
+        function AboutView() {
+            return `
+                <div class="max-w-xl mx-auto px-4 py-6 animate-slide-up">
+                    <div class="text-center mb-10">
+                        <div class="w-24 h-24 bg-white rounded-3xl shadow-xl flex items-center justify-center mx-auto mb-6 p-4 border border-gray-50">
+                            <img src="${LOGO_URL}" class="w-full h-full object-contain">
+                        </div>
+                        <h2 class="text-2xl font-black title-font text-gray-900 uppercase tracking-tight">Rumah Belajar Al Ihsan</h2>
+                        <p class="text-[10px] font-black text-emerald-600 uppercase tracking-[0.3em] mt-2">Gusdurian Mojokerto</p>
+                    </div>
+
+                    <div class="bg-white rounded-[2.5rem] p-8 border border-gray-100 shadow-sm mb-6">
+                        <h3 class="text-sm font-black text-gray-900 mb-4 uppercase tracking-widest flex items-center gap-2">
+                            <i data-lucide="info" class="w-4 h-4 text-emerald-500"></i> Tentang Kami
+                        </h3>
+                        <div class="description-text text-[14px]">
+Rumah Belajar Al Ihsan merupakan inisiatif pendidikan non-formal di bawah naungan komunitas Gusdurian Mojokerto. Kami berfokus pada pendampingan belajar gratis bagi anak-anak dengan mengedepankan nilai-nilai toleransi, kemanusiaan, dan kecintaan pada ilmu pengetahuan.
+
+Melalui portal ini, kami berupaya mendokumentasikan setiap senyum dan langkah kecil para relawan dalam mewujudkan masa depan anak bangsa yang lebih cerah.
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-[2.5rem] p-8 border border-gray-100 shadow-sm">
+                        <h3 class="text-sm font-black text-gray-900 mb-6 uppercase tracking-widest border-b border-gray-50 pb-4 flex items-center gap-2">
+                            <i data-lucide="message-square" class="w-4 h-4 text-emerald-500"></i> Hubungi Kami
+                        </h3>
+                        
+                        <div class="grid grid-cols-1 gap-4">
+                            <a href="https://www.instagram.com/gusdurian_mojokerto" target="_blank" class="contact-card flex items-center gap-4 bg-gray-50 p-4 rounded-2xl">
+                                <div class="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center text-pink-600">
+                                    <i data-lucide="instagram" class="w-6 h-6"></i>
+                                </div>
+                                <div>
+                                    <p class="text-[8px] font-black text-gray-400 uppercase tracking-widest leading-none mb-1">Instagram</p>
+                                    <p class="text-sm font-black text-gray-800">@gusdurianmojokerto</p>
+                                </div>
+                                <i data-lucide="external-link" class="w-4 h-4 text-gray-300 ml-auto"></i>
+                            </a>
+
+                            <a href="mailto:alihsanrumahbelajar@gmail.com" class="contact-card flex items-center gap-4 bg-gray-50 p-4 rounded-2xl">
+                                <div class="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center text-emerald-600">
+                                    <i data-lucide="mail" class="w-6 h-6"></i>
+                                </div>
+                                <div>
+                                    <p class="text-[8px] font-black text-gray-400 uppercase tracking-widest leading-none mb-1">Email</p>
+                                    <p class="text-sm font-black text-gray-800">alihsanrumahbelajar@gmail.com</p>
+                                </div>
+                                <i data-lucide="chevron-right" class="w-4 h-4 text-gray-300 ml-auto"></i>
+                            </a>
+
+                            <a href="https://wa.me/6285961567378" target="_blank" class="contact-card flex items-center gap-4 bg-gray-50 p-4 rounded-2xl border-2 border-emerald-100">
+                                <div class="w-12 h-12 bg-emerald-500 rounded-xl shadow-sm flex items-center justify-center text-white">
+                                    <i data-lucide="phone" class="w-6 h-6"></i>
+                                </div>
+                                <div>
+                                    <p class="text-[8px] font-black text-emerald-600 uppercase tracking-widest leading-none mb-1">WhatsApp Direktur</p>
+                                    <p class="text-sm font-black text-gray-800">+62 859-6156-7378</p>
+                                </div>
+                                <div class="ml-auto bg-emerald-500 text-white text-[8px] font-black px-2 py-1 rounded-md uppercase tracking-tight">Chat</div>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
         const renderApp = () => {
             const container = document.getElementById('app');
             if (!container) return;
@@ -396,7 +551,7 @@
                 html += `
                     <div class="max-w-xl mx-auto px-4 py-6">
                         <div class="text-center mb-8">
-                            <h2 class="text-2xl font-black mb-4 tracking-tight shimmer-effect leading-tight uppercase tracking-tighter">Mewujudkan Senyum<br>Anak Bangsa</h2>
+                            <h2 class="text-2xl font-black mb-4 title-font shimmer-effect leading-tight uppercase tracking-tighter">Mewujudkan Senyum<br>Anak Bangsa</h2>
                             <div class="relative max-w-sm mx-auto">
                                 <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300 w-4 h-4"></i>
                                 <input type="text" oninput="window.handleSearch(event)" placeholder="Cari laporan..." class="w-full bg-white border border-gray-100 rounded-2xl py-3 pl-11 pr-4 text-xs shadow-sm outline-none focus:ring-2 focus:ring-emerald-500">
@@ -409,12 +564,14 @@
                 const report = reports.find(r => r.id == selectedPostId);
                 if (report) html += DetailView(report);
                 else window.setTab('home');
+            } else if (activeTab === 'about') {
+                html += AboutView();
             } else if (activeTab === 'admin') {
                 if (!isAdmin) {
                     html += `
                         <div class="max-w-xs mx-auto py-20 px-5">
                             <div class="bg-white p-8 rounded-[2.5rem] shadow-xl text-center border border-gray-100">
-                                <h2 class="font-black text-lg mb-6 tracking-tight uppercase tracking-widest text-gray-800">Panel Pengurus</h2>
+                                <h2 class="font-black text-lg mb-6 title-font uppercase tracking-widest text-gray-800">Panel Pengurus</h2>
                                 <input type="password" id="admin-pass" placeholder="KODE AKSES" class="w-full bg-gray-50 rounded-xl p-4 text-center text-lg font-black mb-4 outline-none focus:ring-2 focus:ring-emerald-500 tracking-[0.2em]">
                                 <button onclick="window.checkAdmin()" class="w-full bg-emerald-600 text-white font-black py-4 rounded-xl shadow-lg text-[10px] tracking-widest uppercase">Verifikasi</button>
                             </div>
@@ -424,33 +581,36 @@
                     html += `
                         <div class="max-w-xl mx-auto px-4 py-6">
                             <div class="flex justify-between items-center mb-6">
-                                <h2 class="text-xl font-black tracking-tight uppercase text-gray-800">Upload Laporan</h2>
+                                <h2 class="text-xl font-black title-font uppercase text-gray-800">${isEditMode ? 'Edit Laporan' : 'Upload Laporan'}</h2>
                                 <button onclick="window.logoutAdmin()" class="text-red-500 text-[8px] font-black uppercase tracking-widest px-2.5 py-1 bg-red-50 rounded-lg">Keluar</button>
                             </div>
                             <form onsubmit="window.handleUpload(event)" class="bg-white p-6 rounded-[2.2rem] shadow-xl space-y-5 border border-gray-100">
-                                <div class="bg-emerald-50/30 p-6 rounded-[1.8rem] border-2 border-dashed border-emerald-100 text-center relative">
+                                <div class="bg-emerald-50/30 p-6 rounded-[1.8rem] border-2 border-dashed border-emerald-100 text-center relative transition-colors hover:bg-emerald-50/50">
                                     <input type="file" id="files" multiple accept="image/*" class="hidden" onchange="window.handleFileChange(event)">
                                     <label for="files" class="cursor-pointer block">
                                         <div class="w-10 h-10 bg-white text-emerald-600 rounded-xl flex items-center justify-center mx-auto mb-2 shadow-sm"><i data-lucide="image-plus" class="w-5 h-5"></i></div>
-                                        <p class="text-[10px] font-black text-emerald-800 uppercase tracking-widest">${currentSelectedFiles.length ? currentSelectedFiles.length + ' Foto Terpilih' : 'Pilih Foto Kegiatan'}</p>
+                                        <p class="text-[10px] font-black text-emerald-800 uppercase tracking-widest">${currentSelectedFiles.length ? currentSelectedFiles.length + ' Foto Baru' : (isEditMode ? 'Ubah Foto (Opsional)' : 'Pilih Foto Kegiatan')}</p>
                                     </label>
                                 </div>
-                                ${selectedFilePreviews.length ? `<div class="grid grid-cols-5 gap-2">${selectedFilePreviews.map(p => `<div class="aspect-square rounded-lg overflow-hidden border-2 border-white shadow-sm"><img src="${p}" class="w-full h-full object-cover"></div>`).join('')}</div>` : ''}
-                                <div class="space-y-3">
+                                ${selectedFilePreviews.length ? `<div class="grid grid-cols-5 gap-2">${selectedFilePreviews.map(p => `<div class="aspect-square rounded-lg overflow-hidden border-2 border-white shadow-sm"><img src="${p}" class="w-full h-full object-cover"></div>`).join('')}</div>` : (isEditMode && editData.images ? `<div class="grid grid-cols-5 gap-2">${editData.images.map(p => `<div class="aspect-square rounded-lg overflow-hidden border border-gray-100 grayscale opacity-50"><img src="${p}" class="w-full h-full object-cover"></div>`).join('')}</div>` : '')}
+                                <div class="space-y-4">
                                     <div class="space-y-1">
                                         <label class="text-[8px] font-black uppercase tracking-widest text-gray-400 ml-2">Tanggal Kegiatan</label>
-                                        <input type="date" name="date" required class="w-full bg-gray-50 p-3.5 rounded-xl border-none font-bold text-xs outline-none focus:ring-2 focus:ring-emerald-500">
+                                        <input type="date" name="date" required value="${isEditMode ? editData.date : ''}" class="w-full bg-gray-50 p-4 rounded-xl border-none font-bold text-xs outline-none focus:ring-2 focus:ring-emerald-500">
                                     </div>
                                     <div class="space-y-1">
                                         <label class="text-[8px] font-black uppercase tracking-widest text-gray-400 ml-2">Tema/Judul</label>
-                                        <input type="text" name="tema" placeholder="Nama kegiatan" required class="w-full bg-gray-50 p-3.5 rounded-xl border-none font-bold text-xs outline-none focus:ring-2 focus:ring-emerald-500">
+                                        <input type="text" name="tema" placeholder="Contoh: Belajar Bersama" required value="${isEditMode ? editData.tema : ''}" class="w-full bg-gray-50 p-4 rounded-xl border-none font-bold text-xs outline-none focus:ring-2 focus:ring-emerald-500">
                                     </div>
                                     <div class="space-y-1">
                                         <label class="text-[8px] font-black uppercase tracking-widest text-gray-400 ml-2">Deskripsi</label>
-                                        <textarea name="description" placeholder="Ceritakan detail..." required rows="4" class="w-full bg-gray-50 p-3.5 rounded-xl border-none text-xs font-medium outline-none focus:ring-2 focus:ring-emerald-500"></textarea>
+                                        <textarea name="description" placeholder="Ceritakan detail..." required rows="8" class="w-full bg-gray-50 p-4 rounded-xl border-none text-[13px] font-medium outline-none focus:ring-2 focus:ring-emerald-500 leading-relaxed description-text shadow-inner">${isEditMode ? editData.description : ''}</textarea>
                                     </div>
                                 </div>
-                                <button type="submit" id="btn-upload" class="w-full bg-emerald-600 text-white font-black py-4 rounded-xl shadow-xl hover:bg-emerald-700 uppercase tracking-widest text-[10px]">Terbitkan Laporan</button>
+                                <div class="flex gap-2">
+                                    ${isEditMode ? `<button type="button" onclick="window.setTab('home')" class="flex-1 bg-gray-100 text-gray-500 font-black py-4 rounded-xl uppercase tracking-widest text-[10px]">Batal</button>` : ''}
+                                    <button type="submit" id="btn-upload" class="${isEditMode ? 'flex-[2]' : 'w-full'} bg-emerald-600 text-white font-black py-4 rounded-xl shadow-xl hover:bg-emerald-700 uppercase tracking-widest text-[10px] active:scale-[0.98] transition-all">${isEditMode ? 'Simpan' : 'Terbitkan'}</button>
+                                </div>
                             </form>
                         </div>
                     `;
